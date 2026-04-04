@@ -1,0 +1,65 @@
+services:
+
+  cloudsim-java:
+    build:
+      context: ./cloudsim-java
+      dockerfile: Dockerfile
+    container_name: cloudsim
+    ports:
+      - "${PY4J_PORT}:${PY4J_PORT}"
+    volumes:
+      # :ro = read-only, Java chỉ đọc data chứ không ghi
+      - trace-data:/data/trace:ro
+      - results:/data/results
+    environment:
+      - PY4J_PORT=${PY4J_PORT}
+    networks:
+      - sim-net
+    # Healthcheck: thử kết nối port Py4J mỗi 10 giây
+    # Nếu fail 3 lần liên tiếp → container bị đánh dấu "unhealthy"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c 'cat < /dev/null > /dev/tcp/localhost/${PY4J_PORT}' && echo ok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  rl-agent:
+    build:
+      context: ./rl-agent
+      dockerfile: Dockerfile
+    container_name: rl-agent
+    # rl-agent chỉ khởi động SAU KHI cloudsim-java healthy
+    # Không có điều này, Python kết nối Py4J khi Java chưa sẵn sàng → crash
+    depends_on:
+      cloudsim-java:
+        condition: service_healthy
+    volumes:
+      - results:/data/results
+      - model-store:/data/models
+    environment:
+      # Python dùng tên service "cloudsim-java" để tìm IP — Docker DNS tự resolve
+      - GATEWAY_HOST=cloudsim-java
+      - GATEWAY_PORT=${PY4J_PORT}
+      - ENERGY_WEIGHT=${ENERGY_WEIGHT}
+      - SLA_WEIGHT=${SLA_WEIGHT}
+      - WANDB_API_KEY=${WANDB_API_KEY}
+    networks:
+      - sim-net
+
+volumes:
+  # bind mount: map thư mục thật trên máy host vào container
+  trace-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/alibaba-trace
+
+  # named volume: Docker tự quản lý, dữ liệu tồn tại kể cả sau khi container xóa
+  results:
+  model-store:
+
+networks:
+  sim-net:
+    driver: bridge
