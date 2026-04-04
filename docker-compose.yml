@@ -13,6 +13,7 @@ services:
       - results:/data/results
     environment:
       - PY4J_PORT=${PY4J_PORT}
+      - RANDOM_SEED=${RANDOM_SEED}
     networks:
       - sim-net
     # Healthcheck: thử kết nối port Py4J mỗi 10 giây
@@ -44,6 +45,7 @@ services:
       - ENERGY_WEIGHT=${ENERGY_WEIGHT}
       - SLA_WEIGHT=${SLA_WEIGHT}
       - WANDB_API_KEY=${WANDB_API_KEY}
+      - RANDOM_SEED=${RANDOM_SEED}
     networks:
       - sim-net
 
