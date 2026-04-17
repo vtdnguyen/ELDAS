@@ -6,3 +6,6 @@
 ./create-issues.ps1
 
 ./assets/planning/
+
+# Alibaba trace data (large CSV — download via scripts/download-trace.sh)
+data/alibaba-trace/*.csv
