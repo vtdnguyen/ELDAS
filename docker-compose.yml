@@ -60,6 +60,12 @@ volumes:
 
   # named volume: Docker tự quản lý, dữ liệu tồn tại kể cả sau khi container xóa
   results:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/results   # ← maps to ELDAS/data/results/ on your host
+  
   model-store:
 
 networks:

@@ -1,0 +1,387 @@
+% ============================================================
+% CHƯƠNG 1: GIỚI THIỆU
+% MỤC ĐÍCH: Đáp ứng Câu 1 (mục tiêu đề tài) + Câu 2 (yêu cầu đề tài)
+% PHÂN BỔ: ~8–10 trang
+% ============================================================
+\chapter{Giới thiệu}
+\label{chap:gioi-thieu}
+
+\section{Bối cảnh và động lực nghiên cứu}
+\label{sec:boi-canh}
+
+Trong nửa sau của thập kỷ 2020, sự bùng nổ của các mô hình ngôn ngữ lớn
+(\textit{Large Language Models} -- LLM) như GPT-4, LLaMA-3, Gemini và Claude đã
+đẩy nhu cầu tính toán trên bộ tăng tốc đồ họa (GPU) tăng theo cấp số nhân. Các
+phiên huấn luyện một mô hình tiên tiến hiện nay đòi hỏi hàng nghìn GPU NVIDIA
+H100 hoặc A100 chạy liên tục trong nhiều tuần, kéo theo sự mở rộng quy mô chưa
+từng có của các trung tâm dữ liệu (\textit{datacenter}) chuyên dụng cho trí tuệ
+nhân tạo (AI)~\cite{patterson2021carbon, luccioni2023estimating}. Theo báo cáo
+\textit{Electricity 2024} của Cơ quan Năng lượng Quốc tế 
+(IEA)~\cite{iea2024electricity}, tổng năng lượng tiêu thụ của các trung tâm dữ
+liệu, AI và tiền mã hóa trên toàn cầu trong năm 2022 ước đạt khoảng
+$460$~TWh -- tương đương $1{,}5\%$ tổng nhu cầu điện năng thế giới -- và dự báo
+sẽ tăng gấp đôi, chạm ngưỡng $1000$~TWh vào năm 2026, vượt qua tổng tiêu thụ
+điện của cả nước Nhật Bản.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{reference/dc-energy-growth.png}
+  % \fbox{\parbox[c][4.5cm][c]{0.8\textwidth}{\centering
+  %   \textit{[Hình 1.1 -- Tăng trưởng năng lượng tiêu thụ datacenter toàn cầu
+  %   2018--2026, nguồn IEA Electricity 2024]}}}
+  \caption{Xu hướng tiêu thụ điện năng của trung tâm dữ liệu, AI và tiền mã hóa
+  trên toàn cầu giai đoạn 2018--2026. Nguồn: IEA~\cite{iea2024electricity}.}
+  \label{fig:dc-energy-growth}
+\end{figure}
+
+Tuy nhiên, cùng với tốc độ mở rộng đó là một nghịch lý đáng lo ngại về hiệu
+suất sử dụng tài nguyên. Phân tích vết tải (\textit{trace}) công khai của
+Alibaba PAI Cluster v2023~\cite{weng2023alibaba} cho thấy: mặc dù chi phí GPU
+chiếm tới hơn $80\%$ tổng giá thành phần cứng của một AI cluster, hiệu suất sử
+dụng GPU trung bình chỉ đạt $\approx 25$--$40\%$. Nguyên nhân chính nằm ở hiện
+tượng \textbf{phân mảnh tài nguyên} (\textit{Resource Fragmentation}): một host
+có thể còn dư GPU nhưng không còn đủ CPU/RAM để nhận thêm tác vụ, hoặc ngược
+lại, dẫn đến những GPU ``mồ côi'' (\textit{orphan GPUs}) tiêu tốn năng lượng ở
+trạng thái \textit{idle} mà không sinh giá trị tính
+toán~\cite{weng2022mlaas, jeon2019analysis}.
+
+
+Bài toán càng trở nên phức tạp khi nhà vận hành phải đồng thời theo đuổi
+\textbf{hai mục tiêu xung đột}:
+\begin{enumerate}
+  \item \textbf{Tiết kiệm năng lượng} -- giảm tổng điện năng tiêu thụ và lượng
+        khí thải $\mathrm{CO_2}$ tương ứng;
+  \item \textbf{Đảm bảo Thỏa thuận Mức Dịch vụ} (\textit{Service Level
+        Agreement} -- SLA) -- hoàn thành tác vụ trước hạn chót, đặc biệt là các
+        tác vụ \textit{LatencySensitive}.
+\end{enumerate}
+Hai mục tiêu này thường đối lập: việc \textit{consolidation} tác vụ vào ít host
+hơn để tắt bớt các host nhàn rỗi giúp tiết kiệm điện, nhưng lại làm tăng độ trễ
+xếp hàng và nguy cơ vi phạm SLA. Ngược lại, phân tán tải để đảm bảo SLA sẽ
+khiến nhiều host vận hành ở mức tải thấp.
+
+Trong bối cảnh Việt Nam, khi giá điện công nghiệp liên tục được điều chỉnh tăng
+và các cam kết Net-Zero 2050 đặt áp lực mạnh lên ngành công nghiệp tính toán,
+việc xây dựng một nền tảng nghiên cứu cho phép đánh giá và phát triển các thuật
+toán lập lịch \textbf{vừa tiết kiệm năng lượng vừa đảm bảo chất lượng dịch vụ}
+trở thành một nhu cầu mang tính cấp thiết và có giá trị thực tiễn rõ rệt.
+
+\section{Phát biểu bài toán}
+\label{sec:bai-toan}
+
+\subsection{Đầu vào và đầu ra}
+Mô tả bài toán bằng ngôn ngữ kỹ thuật, không hình thức hoá quá mức:
+
+\textbf{Đầu vào.} Hệ thống nhận:
+\begin{itemize}
+  \item Một cụm gồm $m$ \textbf{host} vật lý. Mỗi host có dung lượng cố định
+        về CPU (đơn vị MIPS), RAM (MB), GPU (số chiếc) và băng thông (Mbps).
+  \item Một dòng \textbf{tác vụ} đến theo thời gian. Mỗi tác vụ $\tau_i$
+        khai báo nhu cầu tài nguyên $(r^{\mathrm{cpu}}_i,
+        r^{\mathrm{ram}}_i, r^{\mathrm{gpu}}_i)$, thời hạn hoàn thành $d_i$
+        và nhãn chất lượng dịch vụ $q_i \in \{\text{Burstable},
+        \text{LatencySensitive}, \text{BestEffort}\}$ -- lấy từ Alibaba
+        trace.
+\end{itemize}
+
+\textbf{Đầu ra.} Một quyết định: \emph{tác vụ $\tau_i$ được đặt lên host
+nào, hay tạm hoãn lại đến bước kế tiếp.} Ký hiệu phép gán này là
+$f(\tau_i)$.
+
+\textbf{Ràng buộc bắt buộc.} Tại mọi thời điểm, tổng nhu cầu tài nguyên
+của các tác vụ đang chạy trên một host không được vượt quá dung lượng
+của host đó:
+\begin{equation}
+  \text{Tổng } r^{(k)}_i \text{ trên host } h_j \;\le\; c^{(k)}_j,
+  \quad k \in \{\mathrm{cpu},\mathrm{ram},\mathrm{gpu}\}.
+  \label{eq:capacity}
+\end{equation}
+Đây là điều kiện cứng -- vi phạm là không khả thi, không phải chỉ ``tệ
+hơn''. Hệ thống thực hiện ràng buộc này qua cơ chế \textbf{action
+masking} (Chương~\ref{chap:kien-truc}) -- không cho phép RL agent chọn
+host không đủ tài nguyên ngay từ không gian hành động.
+
+\subsection{Hai mục tiêu cần tối ưu cùng lúc}
+\textbf{Mục tiêu 1 -- Tiết kiệm năng lượng.} Mỗi host $h_j$ tại thời
+điểm $t$ tiêu thụ công suất $P_j(t)$ phụ thuộc mức sử dụng
+$U_j(t) \in [0,1]$. ELDAS dùng \emph{mô hình tuyến tính
+SPECpower}~\cite{beloglazov2012energy}: công suất bằng $P^{\mathrm{idle}}$
+khi host nhàn rỗi, tăng tuyến tính tới $P^{\mathrm{max}}$ khi
+$U_j = 1$:
+\begin{equation}
+  P_j(U_j) \;=\; P^{\mathrm{idle}}_j
+              + U_j \cdot \big(P^{\mathrm{max}}_j - P^{\mathrm{idle}}_j\big).
+  \label{eq:power-model}
+\end{equation}
+\textbf{Tổng năng lượng} của một episode mô phỏng là tổng năng lượng
+trên toàn bộ host theo thời gian:
+\begin{equation}
+  E \;=\; \sum_{\text{host}} \sum_{\text{tick}} P_j(t)\,\Delta t.
+  \label{eq:total-energy}
+\end{equation}
+Đây chỉ là phép \emph{cộng dồn} công suất nhân với độ dài tick theo
+thời gian -- không phải phép tích phân giải tích phức tạp. Mục tiêu là
+\emph{giảm $E$ càng nhiều càng tốt}.
+
+\textbf{Mục tiêu 2 -- Hoàn thành tác vụ trước hạn (SLA).} Một tác vụ
+``trễ hạn'' khi thời điểm hoàn thành $C_i$ vượt deadline $d_i$. Mức độ
+trễ được tính là $\max(0,\, C_i - d_i)$ -- bằng $0$ nếu xong sớm hơn
+hoặc đúng hạn. Tổng vi phạm trên toàn episode là tổng các mức trễ, có
+trọng số theo lớp QoS:
+\begin{equation}
+  V \;=\; \sum_{\text{task}} \lambda(q_i)\,\max\!\big(0,\, C_i - d_i\big),
+  \label{eq:sla-violation}
+\end{equation}
+\begin{table}[H]
+  \centering
+  \footnotesize
+  \begin{tabular}{lc}
+    \toprule
+    \textbf{Nhãn QoS} & \textbf{Hệ số phạt $\lambda$} \\
+    \midrule
+    LatencySensitive (tác vụ tương tác) & $3{,}0$ \\
+    Burstable (tác vụ thường) & $1{,}0$ \\
+    BestEffort (tác vụ nền) & $0{,}3$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Hệ số phạt $\lambda$ cho từng lớp QoS -- vi phạm SLA của tác
+  vụ tương tác bị phạt nặng gấp 3 lần tác vụ thường.}
+  \label{tab:lambda-qos}
+\end{table}
+
+Mục tiêu là \emph{giảm $V$ càng nhiều càng tốt}.
+
+\subsection{Vì sao hai mục tiêu này xung đột?}
+\label{ssec:tradeoff}
+
+Hai mục tiêu trên không thể đồng thời tối ưu vì chúng kéo scheduler
+theo \emph{hai hướng ngược nhau}:
+
+\begin{itemize}
+  \item \textbf{Để tiết kiệm năng lượng:} dồn tải vào ít host hơn, tắt
+        bớt host nhàn rỗi $\Rightarrow$ host ``bận'' có nguy cơ xếp
+        hàng dài, làm tăng trễ $\Rightarrow$ \emph{tăng vi phạm SLA}.
+  \item \textbf{Để đảm bảo SLA:} dải tải ra nhiều host hơn, mỗi host
+        chỉ chạy vài tác vụ $\Rightarrow$ nhiều host vận hành ở mức tải
+        thấp, tiêu hao $P^{\mathrm{idle}}$ trên cả những host gần như
+        không làm việc $\Rightarrow$ \emph{tăng năng lượng}.
+\end{itemize}
+
+Vì vậy không tồn tại một ``phương án tốt nhất tuyệt đối'' mà có \emph{cả
+một dải các phương án đánh đổi}: phương án A tiết kiệm điện hơn nhưng
+trễ nhiều hơn, phương án B đảm bảo SLA tốt hơn nhưng tốn điện hơn.
+
+\textbf{Cách so sánh hai phương án.} Quy ước đơn giản: phương án A
+\emph{tốt hơn} phương án B nếu A \emph{không tệ hơn} ở cả hai mục tiêu
+và \emph{tốt hơn rõ rệt ở ít nhất một}. Nếu A tốt hơn ở mục tiêu này
+nhưng tệ hơn ở mục tiêu kia, hai phương án không thể so sánh trực
+tiếp -- cả hai đều là \emph{ứng cử viên hợp lệ} mà nhà vận hành có thể
+chọn tuỳ chính sách. Tập tất cả các phương án không bị một phương án
+nào khác ``tốt hơn'' chính là \textbf{Pareto front} -- đường biên mà
+ELDAS cố gắng xấp xỉ.
+
+\begin{figure}[H]
+  \centering
+  \fbox{\parbox[c][4.5cm][c]{0.7\textwidth}{\centering
+    \textit{[Hình 1.3 -- Đồ thị 2D minh họa trade-off Energy vs. SLA và đường
+    Pareto front]}}}
+  \caption{Trade-off giữa năng lượng và vi phạm SLA. Mỗi điểm là một chính sách
+  lập lịch; đường cong nối các điểm không bị thống trị (Pareto front) là kết
+  quả mà Phase 2 hướng tới xấp xỉ.}
+  \label{fig:pareto-illustration}
+\end{figure}
+
+\subsection{Độ phức tạp tính toán}
+Trường hợp đơn giản nhất của bài toán -- gán $n$ tác vụ vào $m$ host với một
+chiều tài nguyên duy nhất -- đã tương đương với bài toán \textit{Bin Packing
+NP-hard}~\cite{garey1979computers}. Khi mở rộng sang nhiều chiều tài nguyên,
+nhiều mục tiêu, và bản chất \textit{online} (tác vụ đến theo thời gian thực),
+không thể trông đợi vào lời giải tối ưu chính xác trong thời gian đa thức. Đây
+là động lực chính để chuyển sang các phương pháp dựa trên \textbf{học tăng
+cường đa mục tiêu} (\textit{Multi-Objective Reinforcement Learning} -- MORL),
+nơi agent học được chính sách (\textit{policy}) gần tối ưu thông qua tương tác
+với môi trường mô phỏng~\cite{hayes2022practical, mao2016resource}.
+
+\section{Mục tiêu đề tài}
+\label{sec:muc-tieu}
+
+\subsection{Mục tiêu tổng thể}
+Đề tài \textbf{ELDAS} (\textit{Energy- and Latency-aware Datacenter AI
+Scheduler}) hướng tới xây dựng một \textbf{nền tảng mô phỏng và huấn luyện
+thuật toán MORL} cho bài toán lập lịch tác vụ AI trong trung tâm dữ liệu, với
+khả năng:
+\begin{itemize}
+  \item Tái tạo trung thực hành vi của một cụm máy chủ AI ở quy mô vừa;
+  \item Nạp được dữ liệu workload thực thay vì sinh ngẫu nhiên;
+  \item So sánh công bằng nhiều thuật toán lập lịch (heuristic và RL) trên
+        cùng một bộ kịch bản;
+  \item Sản sinh các chỉ số định lượng đa mục tiêu phục vụ vẽ Pareto front.
+\end{itemize}
+
+\subsection{Mục tiêu Giai đoạn 1 (phạm vi báo cáo này)}
+Báo cáo này trình bày sáu sản phẩm kỹ thuật của Giai đoạn 1. Mỗi sản
+phẩm là một \emph{deliverable cụ thể, có thể kiểm chứng độc lập}:
+
+\begin{enumerate}
+  \item \textbf{MT1 -- Engine mô phỏng datacenter có theo dõi GPU.}
+        Dựng môi trường mô phỏng cụm máy chủ trên nền CloudSim Plus,
+        bổ sung lớp theo dõi GPU (mà CloudSim Plus không hỗ trợ sẵn)
+        và mô hình công suất tuyến tính cho cả CPU lẫn GPU.
+  \item \textbf{MT2 -- Tích hợp workload thực.} Parser đọc trực tiếp
+        Alibaba PAI Cluster Trace v2023, kèm bộ lọc tạo ba kịch bản
+        tải \emph{Low / High / Burst} để phục vụ so sánh.
+  \item \textbf{MT3 -- Cầu nối Java--Python.} Dùng Py4J để Python
+        điều khiển vòng đời mô phỏng (reset / step / pause / resume),
+        đáp ứng đặc thù tương tác từng bước của RL.
+  \item \textbf{MT4 -- Môi trường RL theo chuẩn MO-Gymnasium.}
+        Phần thưởng giữ dạng \textbf{vector hai chiều}
+        $(R^{\mathrm{energy}},\, R^{\mathrm{SLA}})$ -- không cộng dồn
+        về một số; ràng buộc capacity được ép cứng qua action masking.
+  \item \textbf{MT5 -- Hai scheduler baseline.}
+        (i)~\emph{Random allocation} và (ii)~\emph{Kubernetes default}
+        (Filter $\rightarrow$ LeastRequestedPriority). Hai baseline
+        này tạo \emph{đường tham chiếu} cho agent MORL ở Phase 2 phải
+        vượt qua.
+  \item \textbf{MT6 -- Đóng gói tái sản xuất.} Toàn bộ hệ thống được
+        gói trong Docker Compose; chạy cùng seed phải cho kết quả
+        bit-for-bit trùng nhau, kể cả trên máy khác.
+\end{enumerate}
+
+\subsection{Mục tiêu Giai đoạn 2 (kế hoạch tiếp nối)}
+Giai đoạn 2 dựa trên nền tảng MT1--MT6 để:
+\begin{enumerate}
+  \item Huấn luyện agent PPO + MLP, biến hai mục tiêu thành một bằng
+        cách cộng có trọng số: $R = w \cdot R^{\mathrm{energy}} +
+        (1 - w) \cdot R^{\mathrm{SLA}}$;
+  \item Quét trọng số $w$ qua các giá trị
+        $\{0{,}1,\, 0{,}2,\, \dots,\, 0{,}9\}$ để thu được nhiều điểm
+        trên Pareto front;
+  \item So sánh kết quả MORL với hai baseline trên cả ba kịch bản tải,
+        đo trên ba chỉ số: năng lượng, makespan, tỉ lệ vi phạm SLA;
+  \item Tinh chỉnh siêu tham số qua Weights \& Biases; thử Graph
+        Neural Network thay MLP nếu thời gian cho phép.
+\end{enumerate}
+
+\section{Phạm vi và giới hạn}
+\label{sec:pham-vi}
+
+Để đảm bảo tính khả thi trong khuôn khổ một đồ án chuyên ngành, đề tài giới
+hạn phạm vi như sau:
+
+\paragraph{Về quy mô.}
+Cụm mô phỏng cấu hình $5$ host (mỗi host gồm $32$ vCPU, $128$ GB RAM, $4$ GPU
+NVIDIA A100), tải đầu vào trích từ Alibaba trace với kích thước
+$1\,000$--$5\,000$ tác vụ. Quy mô này đủ để bộc lộ hiện tượng phân mảnh tài
+nguyên và xung đột mục tiêu, đồng thời giữ thời gian huấn luyện một episode
+dưới mức chấp nhận được trên phần cứng phòng thí nghiệm.
+
+\paragraph{Về môi trường.}
+Toàn bộ thực nghiệm được thực hiện trong môi trường \textbf{mô phỏng} bằng
+CloudSim Plus, không triển khai trên cụm Kubernetes thực tế. Lý do: chu kỳ
+huấn luyện RL đòi hỏi hàng triệu bước tương tác, không khả thi trên hạ tầng
+thật.
+
+\paragraph{Về phạm vi không bao gồm.}
+Đề tài \textbf{không xét}: (i)~di chuyển máy ảo trực tiếp (\textit{live VM
+migration}); (ii)~lập lịch xuyên trung tâm dữ liệu (\textit{multi-datacenter
+scheduling}); (iii)~mô hình mạng chi tiết (\textit{network topology, congestion
+modeling}); (iv)~lập lịch tác vụ phân tán có giao tiếp tập thể
+(\textit{collective communication trong distributed training}).
+
+\paragraph{Về tập hợp ràng buộc enforce trong Phase 1.}
+Phát biểu bài toán ở §\ref{sec:bai-toan} liệt kê năm chiều
+ràng buộc tài nguyên (CPU, RAM, GPU, băng thông, nhiệt độ). Phase 1
+\textbf{chỉ thực thi cứng} ba chiều CPU/RAM/GPU
+(§\ref{ssec:impl-baselines}); hai chiều còn lại được \emph{hoãn có chủ
+đích} sang Phase 2 với lý do cụ thể như sau:
+
+\begin{itemize}
+  \item \textbf{Băng thông mạng.} Trace Alibaba PAI v2023 không cung
+        cấp trường \texttt{bandwidth\_demand} ở mức task; bổ sung
+        ràng buộc băng thông tại Phase 1 buộc phải sinh giả định tổng
+        hợp (\textit{synthetic}, ví dụ tỉ lệ với \texttt{cpu\_milli}),
+        làm giảm tính tái sản xuất khoa học của báo cáo và tạo ra
+        một biến số không kiểm soát trong khi mục tiêu Phase 1 là
+        \emph{kiểm chứng kiến trúc bốn lớp}. Hơn nữa, mỗi chiều ràng
+        buộc thêm vào tăng kích thước observation thêm $H$ (một
+        feature/host); với $H = 10$ điều này làm chậm hội tụ PPO
+        không cần thiết khi chính thiết kế MORL còn đang được hiệu
+        chỉnh. Phase 2 sẽ kích hoạt \texttt{host.getBwProvisioner()}
+        sẵn có của CloudSim Plus (chỉ cần $\sim 20$ dòng code thêm
+        vào \texttt{VmAllocationPolicy.find()}) sau khi đã có dữ liệu
+        bandwidth thực hoặc một mô hình synthetic được biện luận chặt
+        chẽ.
+  \item \textbf{Nhiệt độ host.} Mô hình nhiệt yêu cầu (a)~mạng RC nhiệt
+        ($T_j(t) = T_{\mathrm{amb}} + \theta_{\mathrm{JA}} \cdot P_j(t)$
+        ở dạng đơn giản nhất), (b)~đường cong fan và ngưỡng throttle,
+        và (c)~tương tác hai chiều với DVFS -- bản thân ba thành phần
+        này là một nghiên cứu phụ. Quan trọng hơn, mô hình năng lượng
+        Phase 1 \emph{tuyến tính} (§\ref{sec:nang-luong}) chưa có DVFS,
+        nên việc thêm thermal lúc này sẽ là một \emph{lớp giả định trên
+        lớp giả định} không có giá trị khoa học. Phase 2 dự kiến đưa
+        DVFS + thermal vào cùng nhau như một gói nhất quán: trước hết
+        thay \eqref{eq:power-model} bằng mô hình bậc hai có DVFS, sau
+        đó thêm $T_j(t)$ làm feature observation và một
+        \texttt{HostFitsThermal} filter dạng K8s predicate (cấm gán
+        task lên host có $T_j > T_{\max}$).
+\end{itemize}
+
+Quyết định này tuân theo nguyên tắc \emph{minimum viable scope}: Phase 1
+ưu tiên các ràng buộc \textbf{có dữ liệu thực} (CPU/RAM/GPU đều có trong
+trace) để mọi con số trong báo cáo đều có thể truy xuất được nguồn;
+các ràng buộc \textbf{cần dữ liệu giả định} được hoãn đến khi mô hình
+nền (power, DVFS) đủ chính xác để không bị nhiễu giả định chồng lên
+giả định.
+
+\paragraph{Về mô hình năng lượng.}
+Sử dụng mô hình tuyến tính \eqref{eq:power-model} cho cả CPU và GPU. Mô hình
+phi tuyến (\textit{cubic, logarithmic}) và DVFS (\textit{Dynamic Voltage and
+Frequency Scaling}) được ghi nhận như hướng mở rộng cho các giai đoạn sau.
+
+\paragraph{Về thuật toán.}
+Phase 1 chỉ hiện thực hai baseline (Random, K8s Default). Phase 2 tập trung
+vào PPO + MLP với linear scalarization. Các phương pháp MORL phức tạp hơn như
+Envelope Q-Learning, Pareto-DQN, hoặc các đầu Graph Neural Network được liệt
+kê trong phần \textit{stretch goals}.
+
+\section{Cấu trúc báo cáo}
+\label{sec:cau-truc}
+
+Báo cáo gồm bảy chương được tổ chức như sau:
+
+\paragraph{Chương~\ref{chap:gioi-thieu} -- Giới thiệu.}
+Trình bày bối cảnh, phát biểu hình thức bài toán lập lịch đa mục tiêu, mục
+tiêu cụ thể, phạm vi và giới hạn của đề tài.
+
+\paragraph{Chương 2 -- Cơ sở lý thuyết và nghiên cứu liên quan.}
+Tổng quan ba mảng: (i)~thuật toán lập lịch truyền thống và Kubernetes
+scheduler; (ii)~mô hình tiêu thụ năng lượng datacenter; (iii)~học tăng cường
+đơn/đa mục tiêu với khảo sát ít nhất ba công trình tiêu biểu.
+
+\paragraph{Chương 3 -- Kiến trúc hệ thống.}
+Mô tả kiến trúc bốn lớp (Docker Compose, CloudSim Plus, Py4J Gateway,
+MO-Gymnasium), các luồng dữ liệu chính và các quyết định thiết kế then chốt.
+
+\paragraph{Chương 4 -- Hiện thực.}
+Trình bày chi tiết hiện thực Phase 1: \texttt{SimulationConfig},
+\texttt{DatacenterFactory}, \texttt{AlibabaTraceReader},
+\texttt{SimulationManager} (lifecycle pause/resume/reset), Py4J
+\texttt{GatewayEntryPoint}, hai \texttt{VmAllocationPolicy} baseline, và phía
+Python: \texttt{state\_builder}, \texttt{reward}, \texttt{environment},
+\texttt{tracker}.
+
+\paragraph{Chương 5 -- Kết quả Phase 1.}
+Báo cáo kết quả \textit{smoke test} vòng RL hoàn chỉnh, kiểm chứng tính đúng
+của bridge Java--Python, đo các chỉ số ban đầu (năng lượng, SLA) của hai
+baseline trên ba kịch bản tải.
+
+\paragraph{Chương 6 -- Kế hoạch Phase 2.}
+Lộ trình huấn luyện PPO, weight sweep, hyperparameter tuning và đánh giá
+Pareto front; đi kèm sơ đồ Gantt và phân tích rủi ro.
+
+\paragraph{Chương 7 -- Kết luận.}
+Tổng kết đóng góp của Phase 1, bài học rút ra, và hướng phát triển.
+
+Phần \textit{Phụ lục} cung cấp toàn bộ tệp cấu hình
+(\texttt{docker-compose.yml}, \texttt{.env}), các đoạn mã đại diện và hướng
+dẫn chạy lại thực nghiệm.

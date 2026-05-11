@@ -1,11 +1,12 @@
 .env 
+.pytest_cache
 
-./projects.json
 ./.vscode/
 ./CLAUDE.md
-./create-issues.ps1
+./.claude/
 
-./assets/planning/
+./assets/
 
 # Alibaba trace data (large CSV — download via scripts/download-trace.sh)
-data/alibaba-trace/*.csv
+data/alibaba-trace/
+

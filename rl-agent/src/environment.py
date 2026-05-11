@@ -285,13 +285,14 @@ class CloudSimEnv(gym.Env):
     # ── Cleanup ───────────────────────────────────────────────────────
 
     def close(self) -> None:
-        """Shut down the Java simulation and Py4J connection."""
+        """Close this client's Py4J connection without killing the Java server.
+
+        Passes send_shutdown=False so that the Java GatewayServer keeps running
+        and other Python clients (or the next test phase) can still connect.
+        Call ep.shutdown() explicitly if you want to stop the Java side.
+        """
         try:
-            self._ep.shutdown()
-        except Exception:
-            pass
-        try:
-            self._gateway.shutdown()
+            self._gateway.shutdown(send_shutdown=False)
         except Exception:
             pass
 

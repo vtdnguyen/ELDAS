@@ -1,0 +1,293 @@
+% ============================================================
+% CHƯƠNG 6: KẾ HOẠCH GIAI ĐOẠN 2
+% MỤC ĐÍCH: Đáp ứng Câu 5 (kế hoạch giai đoạn kế tiếp — nội dung, thời gian, kết quả mong đợi)
+% PHÂN BỔ: ~4–5 trang
+% ============================================================
+\chapter{Kế hoạch Giai đoạn 2}
+\label{chap:ke-hoach}
+
+Phase 1 đã đạt cả sáu mục tiêu MT1--MT6 (Bảng~\ref{tab:mt-checklist}) --
+đặt nền tảng vận hành đầy đủ cho phần huấn luyện và đánh giá MORL.
+Chương này trình bày \textbf{kế hoạch chi tiết của Phase 2} theo bốn
+chiều: (i)~mục tiêu cụ thể (§\ref{sec:p2-goals}); (ii)~lộ trình triển
+khai theo tuần với sơ đồ Gantt (§\ref{sec:p2-roadmap}); (iii)~tiêu chí
+\emph{chấp nhận} (acceptance criteria) định lượng (§\ref{sec:p2-criteria});
+và (iv)~quản lý rủi ro với phương án dự phòng (§\ref{sec:p2-risks}).
+Mục~\ref{sec:p2-future} liệt kê các hướng mở rộng vượt phạm vi đồ án
+chuyên ngành để định vị ELDAS trong bức tranh nghiên cứu dài hạn.
+
+% ============================================================
+\section{Mục tiêu cụ thể của Phase 2}
+\label{sec:p2-goals}
+
+Phase 2 gồm sáu hạng mục công việc, ký hiệu \textbf{P2.1--P2.6},
+đối ứng một-một với các checklist còn lại trong \texttt{CLAUDE.md}:
+
+\begin{table}[H]
+  \centering
+  \caption{Sáu hạng mục công việc của Phase 2 và đầu ra dự kiến.}
+  \label{tab:p2-tasks}
+  \footnotesize
+  \begin{tabularx}{\linewidth}{l X l}
+    \toprule
+    \textbf{ID} & \textbf{Nội dung công việc} & \textbf{Đầu ra} \\
+    \midrule
+    P2.1 & Hoàn thiện vòng huấn luyện PPO + MLP với
+          \textit{linear scalarization} ở một trọng số mặc định
+          $\mathbf{w} = (0{,}8,\, 0{,}2)$. Bật đồng hồ CloudSim,
+          đăng ký \texttt{onClockTickListener}, kích hoạt
+          \texttt{simulation.start()}.
+        & \texttt{train.py}, checkpoint \texttt{.zip}, biểu đồ learning
+          curve (W\&B). \\
+    P2.2 & \emph{Weight sweep} $w_{\mathrm{e}} \in
+          \{0{,}1,\,0{,}2,\,\dots,\,0{,}9\}$: chín lần huấn luyện độc
+          lập (chạy song song bằng \texttt{SubprocVecEnv} hoặc lặp tuần
+          tự nếu RAM hạn chế).
+        & Chín cặp $(\bar R^{\mathrm{e}},\bar R^{\mathrm{s}})$ tạo
+          xấp xỉ Pareto front. \\
+    P2.3 & Tinh chỉnh siêu tham số (learning\_rate, $\gamma$,
+          GAE-$\lambda$, n\_steps, batch\_size) với W\&B Sweeps; chiến
+          lược Bayesian search, $\sim 30$ run.
+        & Bộ siêu tham số tối ưu, summary table. \\
+    P2.4 & Đánh giá ba scheduler (Random / K8s LRP / MORL) trên ba
+          kịch bản (LOW / HIGH / BURST), mỗi cấu hình $\ge 5$ seed.
+        & Bảng $9 \times 5$ ô số liệu, giá trị trung bình + độ lệch
+          chuẩn. \\
+    P2.5 & Vẽ Pareto front (energy vs.\ SLA), bảng so sánh
+          \textit{energy / makespan / SLA violation}, phân tích thống
+          kê (Mann-Whitney U test).
+        & Hình Pareto, bảng cuối cùng cho luận văn tốt nghiệp. \\
+    P2.6 & \emph{Stretch}: thay MLP head bằng GNN nếu MLP đã hội tụ ổn
+          định; backbone: \texttt{torch\_geometric.GCNConv} kích thước
+          $64$.
+        & (Tuỳ chọn) so sánh MLP vs.\ GNN trên cùng trọng số. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Các hạng mục sắp xếp theo \emph{phụ thuộc cứng}: P2.1 phải xong trước
+P2.2; P2.3 chạy độc lập trên scenario nhỏ rồi áp ngược cho P2.1/P2.2;
+P2.4 cần kết quả của P2.2 và baseline đã có từ Phase 1; P2.5 tổng
+hợp; P2.6 chỉ thực hiện nếu còn thời gian sau P2.5.
+
+% ============================================================
+\section{Lộ trình triển khai (8 tuần)}
+\label{sec:p2-roadmap}
+
+Phase 2 dự kiến kéo dài \textbf{8 tuần} từ tuần đầu tháng $05/2026$
+tới hết tháng $06/2026$ (kết thúc trước kỳ hè). Bảng~\ref{tab:p2-week}
+phân rã chi tiết theo tuần; Hình~\ref{fig:gantt} trực quan hoá phụ
+thuộc và song song.
+
+\begin{table}[H]
+  \centering
+  \caption{Lộ trình Phase 2 theo tuần. Kết quả mong đợi của mỗi tuần
+  là điều kiện tiên quyết để chuyển sang tuần kế.}
+  \label{tab:p2-week}
+  \footnotesize
+  \begin{tabularx}{\linewidth}{c l X l}
+    \toprule
+    \textbf{Tuần} & \textbf{Hạng mục} & \textbf{Kết quả mong đợi}
+                  & \textbf{Rủi ro chính} \\
+    \midrule
+    1 & P2.1a & Bật đồng hồ CloudSim không gây NPE; smoke test pha 5
+              chạy với \texttt{simulation.start()}.
+              & NPE deep CloudSim. \\
+    2 & P2.1b & Vòng huấn luyện PPO + MaskablePPO chạy hết $10^5$ step
+              không lỗi; episodic return có xu hướng tăng dần.
+              & RL không converge. \\
+    3 & P2.3  & W\&B sweep Bayesian, $30$ run, top-3 cấu hình lưu lại.
+              & Chi phí tính toán. \\
+    4--5 & P2.2 & Weight sweep $9$ trọng số $\times \ge 3$ seed
+                = $27$ run; mỗi run $\sim 1$\,M step.
+                & Quá tải RAM/disk. \\
+    6 & P2.4  & Bảng $9$ cấu hình với mean $\pm$ std; commit log đầy
+              đủ.
+              & Variance lớn $\Rightarrow$ p-value cao. \\
+    7 & P2.5  & Hình Pareto, bảng cuối, viết Chương 5 luận văn tốt
+              nghiệp.
+              & ----- \\
+    8 & P2.6 \emph{(stretch)} & GNN head + so sánh; nếu không đạt,
+                                fallback sang viết báo cáo cuối.
+              & Thời gian. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{\linewidth}{!}{%
+  \begin{ganttchart}[
+      vgrid, hgrid,
+      x unit=1.05cm,
+      y unit title=8mm, y unit chart=7mm,
+      title label font=\footnotesize\bfseries,
+      bar label font=\footnotesize,
+      milestone label font=\footnotesize\itshape,
+      bar/.style={fill=blue!35, draw=blue!60!black},
+      bar incomplete/.style={fill=gray!25},
+      group/.style={fill=orange!50, draw=orange!70!black},
+      milestone/.style={fill=red!70, draw=red!90!black}
+    ]{1}{8}
+    \gantttitle{Phase 2 -- 8 tuần (05/2026 -- 06/2026)}{8} \\
+    \gantttitlelist{1,...,8}{1} \\
+    \ganttgroup{P2.1 PPO + MLP loop}{1}{2}      \\
+    \ganttbar  {P2.1a Enable clock}{1}{1}        \\
+    \ganttbar  {P2.1b Train one run}{2}{2}       \\
+    \ganttbar  {P2.3 Hyperparameter sweep}{3}{3} \\
+    \ganttgroup{P2.2 Weight sweep ($9\times 3$ seed)}{4}{5} \\
+    \ganttbar  {P2.4 Evaluation 9 cells}{6}{6}   \\
+    \ganttbar  {P2.5 Pareto + báo cáo}{7}{7}     \\
+    \ganttbar  {P2.6 GNN (stretch)}{8}{8}        \\
+    \ganttmilestone{Phase 2 deliverable}{8}      \\
+    \ganttlink{elem2}{elem3}
+    \ganttlink{elem3}{elem4}
+    \ganttlink{elem4}{elem6}
+    \ganttlink{elem6}{elem7}
+    \ganttlink{elem7}{elem8}
+  \end{ganttchart}}
+  \caption{Sơ đồ Gantt của Phase 2. Các hộp xanh là task chạy được, hộp
+  cam là nhóm gộp, mốc đỏ là deliverable cuối. Mũi tên thể hiện phụ
+  thuộc cứng.}
+  \label{fig:gantt}
+\end{figure}
+
+\textbf{Tài nguyên huấn luyện.} Toàn bộ huấn luyện chạy trên CPU
+laptop (cùng cấu hình ở Bảng~\ref{tab:test-env}). Không cần GPU vì
+mạng MLP nhỏ ($2 \times 64$ hidden) và môi trường mô phỏng là CPU-bound.
+Ước tính chi phí thời gian:
+\begin{itemize}
+  \item Một episode HIGH ($\sim 6\,900$ tác vụ): $\sim 7$\,giây
+        wall-clock.
+  \item $10^6$ step $\approx 145$ episode $\approx 17$\,phút.
+  \item $27$ run $\times\,17$ phút $= 7{,}5$\,giờ -- chạy qua đêm là
+        đủ.
+\end{itemize}
+
+% ============================================================
+\section{Tiêu chí chấp nhận định lượng}
+\label{sec:p2-criteria}
+
+Để đánh giá Phase 2 \emph{thành công}, bốn tiêu chí định lượng được
+cố định trước khi bắt đầu huấn luyện -- tránh thiên vị kết quả về sau:
+
+\begin{table}[H]
+  \centering
+  \caption{Bốn tiêu chí chấp nhận của Phase 2. Tất cả phải đạt
+  \texttt{\checkmark} mới coi là Phase 2 thành công.}
+  \label{tab:p2-criteria}
+  \footnotesize
+  \begin{tabularx}{\linewidth}{l X l}
+    \toprule
+    \textbf{Tiêu chí} & \textbf{Phát biểu định lượng} & \textbf{Đo bằng} \\
+    \midrule
+    AC1 -- Hội tụ      & Episodic return tăng đơn điệu trên $\ge 70\%$
+                          khoảng $10^5$ -- $10^6$ step (smoothed window
+                          $1\,000$).
+                       & W\&B \texttt{ep\_rew\_mean}. \\
+    AC2 -- Tiết kiệm   & Trung bình MORL trên $5$ seed tiết kiệm
+                          $\ge 10\%$ năng lượng so với K8s LRP ở cùng
+                          mức SLA violation rate.
+                       & Bảng cuối, cột $E$. \\
+    AC3 -- SLA          & Tại trọng số $w_{\mathrm{e}} \le 0{,}3$,
+                          violation rate của MORL $\le 80\%$ rate của
+                          K8s LRP.
+                       & Bảng cuối, cột Viol.\,rate. \\
+    AC4 -- Pareto cover & MORL chiếm $\ge 5$ điểm trên Pareto front
+                          không bị baseline thống trị; \emph{hyper-volume}
+                          MORL $\ge 1{,}1\times$ baseline.
+                       & MO-Gym \texttt{hypervolume.py}. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Bốn ngưỡng trên dựa vào kết quả tham khảo trong các công trình tương
+tự (DeepRM~\cite{mao2016resource} -- $20\%$ slowdown reduction;
+Decima~\cite{decima2019} -- $21\%$ JCT reduction). Mức $10\%$ năng
+lượng (AC2) được chọn \emph{thận trọng} vì K8s LRP đã là baseline
+mạnh -- không phải First-Fit.
+
+% ============================================================
+\section{Quản lý rủi ro}
+\label{sec:p2-risks}
+
+Bảng~\ref{tab:p2-risks} liệt kê \emph{năm rủi ro chính} đã nhận diện
+trước, kèm xác suất ($P$), tác động ($I$), và phương án ứng phó. Xác
+suất $\times$ tác động cao nhất là R1 (RL không hội tụ) -- được dành
+gấp đôi ngân sách thời gian dự phòng (cuối tuần 2--3).
+
+\begin{table}[H]
+  \centering
+  \caption{Phân tích rủi ro Phase 2. Thang $P/I$: thấp / trung / cao.}
+  \label{tab:p2-risks}
+  \footnotesize
+  \begin{tabularx}{\linewidth}{l X c c X}
+    \toprule
+    \textbf{ID} & \textbf{Mô tả rủi ro} & \textbf{P} & \textbf{I}
+                & \textbf{Phương án ứng phó} \\
+    \midrule
+    R1 & PPO không converge: episodic return không tăng hoặc giảm.
+       & Trung & Cao
+       & Giảm \textit{learning\_rate} từ $3\cdot 10^{-4}$ xuống
+         $10^{-4}$; bật \texttt{normalize\_reward}; rút gọn observation
+         (chỉ CPU + GPU, bỏ RAM). \\
+    R2 & Bật đồng hồ CloudSim sinh NPE deep.
+       & Trung & Cao
+       & Giữ nguyên \textit{manual tracking} của Phase 1 -- chấp nhận
+         Phase 2 chạy không có CloudSim event-loop, chỉ làm time-stepped
+         RL. \\
+    R3 & Reward $r^{\mathrm{SLA}}$ thưa $\Rightarrow$ gradient nhỏ.
+       & Cao  & Trung
+       & Bật \texttt{RewardNormalizer} (Welford) đã hiện thực ở Phase 1
+         (§\ref{ssec:impl-reward}); thử reward shaping bonus
+         ``khoảng cách tới deadline''. \\
+    R4 & Chi phí tính toán vượt ngân sách laptop.
+       & Trung & Trung
+       & Giảm số seed từ $5$ xuống $3$; rút \emph{max\_steps} mỗi
+         episode; chuyển sang scenario LOW cho hyperparam sweep. \\
+    R5 & Không có Internet $\Rightarrow$ W\&B offline.
+       & Thấp & Thấp
+       & \texttt{ExperimentTracker} đã có nhánh fallback console
+         (§\ref{ssec:impl-tracker}); log tay vào CSV cũng đủ phân tích. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ============================================================
+\section{Hướng mở rộng dài hạn}
+\label{sec:p2-future}
+
+Vượt khỏi phạm vi đồ án chuyên ngành (Phase 2), bốn hướng nghiên cứu
+được khuyến nghị cho luận văn tốt nghiệp hoặc các nhánh nghiên cứu kế
+tiếp:
+
+\paragraph{1.\,Sim-to-real transfer.} Port chính sách đã huấn luyện
+sang \textit{KubeScheduler} thật. Nhờ thiết kế Lớp 3 tối giản
+(§\ref{sec:layer-py4j}), chỉ cần thay \texttt{SimulationManager} bằng
+một \texttt{KubernetesManager} hiện thực cùng API
+\texttt{reset / step / getActionMask}; toàn bộ phía Python không phải
+sửa.
+
+\paragraph{2.\,Pareto-aware MORL chuyên dụng.} Thay \emph{linear
+scalarization} (vốn không khám phá được phần lõm Pareto front) bằng
+\textit{Envelope Q-Learning}~\cite{hayes2022practical} hoặc
+\textit{Pareto-DQN}. Cấu trúc reward vector hai chiều của ELDAS đã
+sẵn sàng.
+
+\paragraph{3.\,Mô hình năng lượng phi tuyến + DVFS.} Thay
+\texttt{PowerModelHostSimple} bằng mô hình cubic + DVFS với dữ liệu
+tần số/điện áp lấy từ \texttt{turbostat} hoặc nVidia DCGM. Phù hợp
+cho luận văn cấp Master.
+
+\paragraph{4.\,Multi-datacenter scheduling + live VM migration.}
+Mở rộng topology lên hai datacenter có băng thông giới hạn; bổ sung
+hành động \texttt{migrate(vm, src, dst)} với chi phí năng lượng động;
+mục tiêu thứ ba: \emph{network cost}. Đây là bước tự nhiên để biến
+ELDAS thành benchmark MORL ba mục tiêu.
+
+\bigskip
+\noindent
+Phase 2 sẽ kết thúc với một bộ \emph{deliverable} hoàn chỉnh: chín
+checkpoint mô hình, một file Pareto front (\texttt{.json}), bảng so
+sánh ba scheduler, và bản nháp Chương 5/6 luận văn tốt nghiệp -- tạo
+tiền đề cho các hướng mở rộng (1)--(4) ở phần sau khoá học.

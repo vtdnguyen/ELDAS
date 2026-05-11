@@ -105,6 +105,7 @@ def run_all_baselines(
     tracker: ExperimentTracker | None = None,
     gateway_host: str | None = None,
     gateway_port: int | None = None,
+    output_dir: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Run all baseline schedulers and return a comparison dict.
 
@@ -118,6 +119,9 @@ def run_all_baselines(
         If provided, log episode results and comparison table.
     gateway_host, gateway_port : str, int or None
         Py4J connection overrides.
+    output_dir : str or None
+        If provided, export per-policy ``metrics.csv`` + ``summary.json``
+        under ``{output_dir}/{policy}/`` via Java's MetricsExporter.
 
     Returns
     -------
@@ -144,6 +148,12 @@ def run_all_baselines(
               f"energy={result['total_energy_kwh']:.4f} kWh, "
               f"r_energy={result['total_energy_reward']:.2f}, "
               f"r_sla={result['total_sla_reward']:.2f}")
+
+        # Export per-policy metrics.csv + summary.json via Java MetricsExporter
+        if output_dir is not None:
+            policy_dir = str(Path(output_dir) / policy)
+            env.export_metrics(policy_dir)
+            print(f"[baseline_eval] Metrics exported → {policy_dir}/")
 
         if tracker is not None:
             tracker.log_episode(
@@ -228,13 +238,18 @@ def main() -> None:
         enabled=False if args.no_wandb else None,
     )
 
+    # Output goes into a scenario-named subfolder so multiple scenarios
+    # can coexist under the same --output root (e.g. /data/results).
+    scenario_dir = str(Path(args.output) / f"baseline-{args.scenario}")
+
     results = run_all_baselines(
         scenario=args.scenario,
         seed=seed,
         tracker=tracker,
+        output_dir=scenario_dir,
     )
 
-    save_results(results, args.output)
+    save_results(results, scenario_dir)
     tracker.finish()
 
 

@@ -2,16 +2,9 @@ package sim;
 
 import org.cloudsimplus.brokers.DatacenterBroker;
 import org.cloudsimplus.brokers.DatacenterBrokerSimple;
-import org.cloudsimplus.cloudlets.Cloudlet;
-import org.cloudsimplus.cloudlets.CloudletSimple;
 import org.cloudsimplus.core.CloudSimPlus;
 import org.cloudsimplus.datacenters.Datacenter;
 import org.cloudsimplus.hosts.Host;
-import org.cloudsimplus.schedulers.cloudlet.CloudletSchedulerTimeShared;
-import org.cloudsimplus.utilizationmodels.UtilizationModelDynamic;
-import org.cloudsimplus.utilizationmodels.UtilizationModelFull;
-import org.cloudsimplus.vms.Vm;
-import org.cloudsimplus.vms.VmSimple;
 
 import sim.AlibabaTraceReader.TaskRecord;
 import sim.DatacenterFactory.GpuState;
@@ -64,12 +57,12 @@ public class SimulationManager {
     private int               currentTaskIdx;
     private boolean           episodeDone;
 
-    // ── VM / Cloudlet tracking ─────────────────────────────────────────────
+    // ── Manual resource tracking (CloudSim simulation is not started, so
+    //    host.getCpuPercentUtilization() / getRam().getAvailableResource()
+    //    always return 0/full. We maintain our own accounting instead.) ────────
 
-    private final List<Vm>      submittedVms      = new ArrayList<>();
-    private final List<Cloudlet> submittedCloudlets = new ArrayList<>();
-    private final Map<Vm, TaskRecord> vmToTask     = new HashMap<>();
-    private final Map<Host, Integer>  hostGpuAlloc  = new HashMap<>();
+    private final Map<Host, Integer> hostPeUsage  = new HashMap<>();
+    private final Map<Host, Long>    hostRamUsage = new HashMap<>();
 
     // ── Energy tracking ────────────────────────────────────────────────────
 
@@ -203,11 +196,14 @@ public class SimulationManager {
         simulation = new CloudSimPlus();
 
         // 2. Datacenter + GPU registry
-        gpuRegistry = new LinkedHashMap<>();
+        // IdentityHashMap uses object-reference equality (==), ensuring each
+        // Host is stored as a distinct key regardless of its getId() value.
+        gpuRegistry = new java.util.IdentityHashMap<>();
         datacenter  = DatacenterFactory.create(simulation, dcSpec, gpuRegistry);
 
-        // 3. Hosts list (stable ordering)
-        hosts = new ArrayList<>(gpuRegistry.keySet());
+        // 3. Hosts list — use the datacenter's authoritative ordered list,
+        //    not gpuRegistry.keySet() (IdentityHashMap has no stable order).
+        hosts = new ArrayList<>(datacenter.getHostList());
 
         // 4. Broker
         broker = new DatacenterBrokerSimple(simulation);
@@ -227,10 +223,8 @@ public class SimulationManager {
         cumulativeGpuEnergyWs  = 0;
         lastEnergyTimestamp    = 0;
         slaViolationCount      = 0;
-        submittedVms.clear();
-        submittedCloudlets.clear();
-        vmToTask.clear();
-        hostGpuAlloc.clear();
+        hostPeUsage.clear();
+        hostRamUsage.clear();
         snapshots.clear();
 
         System.out.printf("[SimulationManager] Built simulation: %d hosts, %d tasks (%s)%n",
@@ -300,43 +294,27 @@ public class SimulationManager {
     // ════════════════════════════════════════════════════════════════════════
 
     private void allocateTask(TaskRecord task, Host host) {
-        // Create VM matching task resource requirements
-        Vm vm = new VmSimple(dcSpec.hostSpec().mips(), task.pesNeeded());
-        vm.setRam(task.memoryMib())
-          .setBw(100)            // minimal BW for scheduling workloads
-          .setSize(1024)         // 1 GB disk per VM
-          .setCloudletScheduler(new CloudletSchedulerTimeShared());
+        // Manual resource tracking.
+        // broker.submitVm() internally calls simulation.schedule() which requires
+        // a started CloudSim clock — omitting it prevents silent JVM crashes.
+        // Phase 2 will start the simulation clock and restore CloudSim execution.
+        hostPeUsage.merge(host, task.pesNeeded(), Integer::sum);
+        hostRamUsage.merge(host, (long) task.memoryMib(), Long::sum);
 
-        // Create Cloudlet with execution length based on task duration
-        long lengthMi = Math.max(1, (long) (task.duration() * dcSpec.hostSpec().mips()));
-        Cloudlet cloudlet = new CloudletSimple(lengthMi, task.pesNeeded());
-        cloudlet.setUtilizationModelCpu(new UtilizationModelFull());
-        cloudlet.setUtilizationModelRam(new UtilizationModelDynamic(0.5));
-        cloudlet.setUtilizationModelBw(new UtilizationModelDynamic(0.1));
-
-        // Submit to broker
-        broker.submitVm(vm);
-        broker.bindCloudletToVm(cloudlet, vm);
-        broker.submitCloudlet(cloudlet);
-
-        // GPU allocation
         if (task.numGpu() > 0) {
             GpuState gpuState = gpuRegistry.get(host);
             if (gpuState != null) {
                 gpuState.allocate(task.numGpu());
             }
         }
-
-        // Track
-        submittedVms.add(vm);
-        submittedCloudlets.add(cloudlet);
-        vmToTask.put(vm, task);
     }
 
     /** Check if a host can accept a task (CPU PEs + RAM + GPU). */
     private boolean canHost(Host host, TaskRecord task) {
-        long freePes = host.getFreePesNumber();
-        long freeRam = host.getRam().getAvailableResource();
+        int  usedPes = hostPeUsage.getOrDefault(host, 0);
+        long usedRam = hostRamUsage.getOrDefault(host, 0L);
+        int  freePes = dcSpec.hostSpec().pesCount() - usedPes;
+        long freeRam = dcSpec.hostSpec().ramMb()    - usedRam;
         GpuState gpu = gpuRegistry.get(host);
         int freeGpus = (gpu != null) ? gpu.available() : 0;
 
@@ -356,7 +334,9 @@ public class SimulationManager {
      */
     private double[] computeReward(TaskRecord task, Host host) {
         // ── R_energy: incremental energy from this allocation ──
-        double cpuUtil = host.getCpuPercentUtilization();
+        // Use manual PE tracking (allocateTask already updated hostPeUsage).
+        int usedPes = hostPeUsage.getOrDefault(host, 0);
+        double cpuUtil = Math.min(1.0, (double) usedPes / dcSpec.hostSpec().pesCount());
         double cpuPower = dcSpec.powerSpec().cpuIdlePowerWatt()
                 + (dcSpec.powerSpec().cpuMaxPowerWatt() - dcSpec.powerSpec().cpuIdlePowerWatt())
                   * cpuUtil;
@@ -388,7 +368,8 @@ public class SimulationManager {
         if (dt <= 0) return;
 
         for (Host host : hosts) {
-            double cpuUtil = host.getCpuPercentUtilization();
+            int usedPes = hostPeUsage.getOrDefault(host, 0);
+            double cpuUtil = Math.min(1.0, (double) usedPes / dcSpec.hostSpec().pesCount());
             double cpuPower = dcSpec.powerSpec().cpuIdlePowerWatt()
                     + (dcSpec.powerSpec().cpuMaxPowerWatt() - dcSpec.powerSpec().cpuIdlePowerWatt())
                       * cpuUtil;
@@ -423,9 +404,10 @@ public class SimulationManager {
 
         for (int i = 0; i < h; i++) {
             Host host = hosts.get(i);
-            obs[i]         = host.getCpuPercentUtilization();
-            obs[h + i]     = 1.0 - (double) host.getRam().getAvailableResource()
-                                            / host.getRam().getCapacity();
+            int  usedPes = hostPeUsage.getOrDefault(host, 0);
+            long usedRam = hostRamUsage.getOrDefault(host, 0L);
+            obs[i]         = Math.min(1.0, (double) usedPes / dcSpec.hostSpec().pesCount());
+            obs[h + i]     = Math.min(1.0, (double) usedRam / dcSpec.hostSpec().ramMb());
             GpuState gpu   = gpuRegistry.get(host);
             obs[2 * h + i] = (gpu != null) ? gpu.utilization() : 0.0;
         }
@@ -451,7 +433,9 @@ public class SimulationManager {
         double cpuKwh = cumulativeCpuEnergyWs / 3_600_000.0;
         double gpuKwh = cumulativeGpuEnergyWs / 3_600_000.0;
 
-        double avgCpuUtil = MetricsExporter.averageCpuUtilization(hosts);
+        double avgCpuUtil = hosts.isEmpty() ? 0.0 : hostPeUsage.values().stream()
+                .mapToInt(Integer::intValue).average().orElse(0.0)
+                / dcSpec.hostSpec().pesCount();
         double avgGpuUtil = MetricsExporter.averageGpuUtilization(gpuRegistry);
 
         // Average SLA slack across all scheduled tasks so far

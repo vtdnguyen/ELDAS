@@ -1,0 +1,825 @@
+% ============================================================
+% CHƯƠNG 3: THIẾT KẾ KIẾN TRÚC HỆ THỐNG
+% MỤC ĐÍCH: Đáp ứng Câu 4 (giải pháp + biện luận — 30 điểm, mục cao nhất)
+% PHÂN BỔ: ~12–14 trang (chương quan trọng nhất)
+% ============================================================
+\chapter{Thiết kế kiến trúc hệ thống}
+\label{chap:kien-truc}
+
+Chương này mô tả cách ELDAS được thiết kế để giải bài toán đặt ra ở
+Chương~\ref{chap:gioi-thieu}. Hệ thống chia thành \textbf{bốn lớp} -- mỗi
+lớp đảm nhiệm một vai trò riêng và giao tiếp với nhau qua giao diện rõ
+ràng. Phần đầu chương giới thiệu tổng quan kiến trúc và lý do chọn từng
+công nghệ; các phần sau lần lượt mô tả chi tiết bốn lớp: mô phỏng
+(CloudSim Plus), cầu nối ngôn ngữ (Py4J), tác tử học (MO-Gymnasium), và
+đóng gói hạ tầng (Docker Compose).
+
+% ============================================================
+\section{Tổng quan kiến trúc bốn lớp}
+\label{sec:tong-quan-kien-truc}
+
+\subsection{Vì sao chia thành bốn lớp?}
+ELDAS phải kết hợp ba phần rất khác nhau: \textbf{mô phỏng cluster}
+(CPU, RAM, GPU, năng lượng), \textbf{thuật toán học} (PPO, mạng nơ-ron),
+và \textbf{đóng gói triển khai} (Docker, volume, biến môi trường). Nếu
+gộp hết vào một chương trình duy nhất, ba khó khăn lập tức xuất hiện:
+\begin{itemize}
+  \item Engine mô phỏng tốt nhất cho năng lượng datacenter (CloudSim Plus)
+        chỉ viết bằng Java, trong khi mọi thư viện RL hiện đại (PyTorch,
+        Stable-Baselines3, MO-Gymnasium) đều viết bằng Python -- hai ngôn
+        ngữ không chạy chung process.
+  \item Mỗi lần đổi siêu tham số huấn luyện không nên phải khởi động lại
+        cả engine mô phỏng -- rất tốn thời gian.
+  \item Người khác phải dựng lại được toàn bộ hệ thống bằng một câu lệnh,
+        không phải cài tay từng phần.
+\end{itemize}
+
+Cách giải quyết là chia hệ thống thành bốn lớp (Hình~\ref{fig:arch-overview}).
+Java và Python chạy trong hai container Docker riêng, nói chuyện với nhau
+qua một cầu nối trong cùng mạng nội bộ.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+      font=\small,
+      node distance=4mm and 8mm,
+      box/.style    ={draw, rounded corners=2pt, minimum height=8mm,
+                      minimum width=46mm, align=center, fill=white},
+      l1/.style     ={box, fill=gray!10},
+      l2/.style     ={box, fill=blue!8},
+      l3/.style     ={box, fill=green!8},
+      l4/.style     ={box, fill=orange!10},
+      arrow/.style  ={-{Latex[length=2mm]}, thick},
+      bidir/.style  ={{Latex[length=2mm]}-{Latex[length=2mm]}, thick}
+    ]
+    % ── L4 (top): Python MORL ──
+    \node[l4] (state)   {\texttt{state\_builder}};
+    \node[l4, right=of state] (rew) {\texttt{reward}};
+    \node[l4, right=of rew]   (env) {\texttt{environment}\\(MO-Gym)};
+    \node[l4, right=of env]   (trk) {\texttt{tracker}\\(W\&B)};
+    \node[fit=(state)(trk),
+          draw, dashed, inner sep=4mm,
+          label={[anchor=north west,xshift=2mm,yshift=-1mm,font=\small\bfseries]
+                  north west:Lớp 4 — MO-Gymnasium Agent (Python 3.11)}] (L4) {};
+
+    % ── L3: bridge ──
+    \node[l3, below=12mm of env] (gw) {\texttt{Py4J Gateway} (TCP :25333)};
+    \node[fit=(gw),
+          draw, dashed, inner sep=4mm,
+          label={[anchor=north west,xshift=2mm,yshift=-1mm,font=\small\bfseries]
+                  north west:Lớp 3 — Cầu nối Java\,$\leftrightarrow$\,Python}] (L3) {};
+
+    % ── L2: Java sim ──
+    \node[l2, below=12mm of state] (sim)  {\texttt{Simulation}\\\texttt{Manager}};
+    \node[l2, right=of sim]        (dcf)  {\texttt{Datacenter}\\\texttt{Factory}};
+    \node[l2, right=of dcf]        (trc)  {\texttt{AlibabaTrace}\\\texttt{Reader}};
+    \node[l2, right=of trc]        (pol)  {\texttt{VmAlloc}\\\texttt{Policy}};
+    \node[fit=(sim)(pol),
+          draw, dashed, inner sep=4mm,
+          label={[anchor=north west,xshift=2mm,yshift=-1mm,font=\small\bfseries]
+                  north west:Lớp 2 — CloudSim Plus 8.5.7 (Java 21)}] (L2) {};
+
+    % ── L1: Docker ──
+    \node[l1, below=10mm of dcf, minimum width=120mm] (dc) {%
+      \texttt{docker compose} \;\;|\;\; bridge \texttt{sim-net} \;\;|\;\;
+      volumes: \texttt{trace-data}, \texttt{results}, \texttt{model-store}};
+    \node[fit=(dc),
+          draw, dashed, inner sep=4mm,
+          label={[anchor=north west,xshift=2mm,yshift=-1mm,font=\small\bfseries]
+                  north west:Lớp 1 — Docker Compose v2 (host OS)}] (L1) {};
+
+    % ── arrows ──
+    \draw[bidir] (env.south)  -- node[right,font=\scriptsize]
+                                  {\texttt{step()/reset()}} (gw.north);
+    \draw[bidir] (gw.south west) -- (sim.north);
+    \draw[arrow] (trc.north) -- ++(0,5mm) -| (env.south east)
+                  node[pos=0.25,above,font=\scriptsize]{trace CSV};
+  \end{tikzpicture}
+  \caption{Kiến trúc bốn lớp của ELDAS. Mỗi đường đứt nét là một biên cô lập
+  về ngôn ngữ, container, hoặc hạ tầng. Mũi tên đậm đánh dấu kênh giao tiếp
+  hai chiều của vòng lặp RL.}
+  \label{fig:arch-overview}
+\end{figure}
+
+\subsection{Vai trò từng lớp}
+\textbf{Lớp 1 -- Docker Compose.} Đảm bảo toàn bộ hệ thống chạy giống
+nhau trên mọi máy. Hai container (\texttt{cloudsim-java} và
+\texttt{rl-agent}) cùng dùng chung mạng nội bộ và ba volume chứa dữ liệu
+trace, kết quả, và checkpoint.
+
+\textbf{Lớp 2 -- CloudSim Plus.} Đóng vai trò ``môi trường'' theo nghĩa
+RL: chứa cluster ảo (host, CPU, RAM, GPU), đọc trace Alibaba, nhận hành
+động từ agent, và trả về trạng thái mới cùng phần thưởng. Toàn bộ mô
+hình năng lượng và GPU đều nằm ở đây.
+
+\textbf{Lớp 3 -- Py4J Gateway.} Là cây cầu nối giữa Java và Python. Chỉ
+phơi ra một vài phương thức cơ bản (\texttt{reset}, \texttt{step},
+\texttt{getActionMask}, \texttt{exportMetrics}). Python không cần biết
+gì về CloudSim, nên sau này có thể thay engine khác (KWOK hoặc
+Kubernetes thật) mà không phải sửa code Python.
+
+\textbf{Lớp 4 -- MO-Gymnasium Agent.} Đóng vai trò ``tác tử'' RL: nhận
+quan sát từ Java, dùng MaskablePPO chọn hành động, ghi log lên Weights
+\& Biases. Toàn bộ hệ sinh thái Python (PyTorch, Stable-Baselines3,
+MO-Gymnasium) sống ở đây.
+
+\subsection{Một bước trong vòng lặp RL diễn ra thế nào?}
+Hình~\ref{fig:rl-sequence} minh hoạ quá trình một lần \texttt{step()}:
+Python gửi hành động sang Java, Java cập nhật mô phỏng và trả về quan
+sát mới cùng phần thưởng. Toàn bộ vòng tròn (\emph{round-trip}) chỉ tốn
+khoảng $0{,}1$--$0{,}3$\,ms khi hai container chạy trên cùng máy.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+      font=\small,
+      lifeline/.style={draw, very thick, dashed, gray!60},
+      msg/.style={-{Latex[length=2mm]}, thick},
+      block/.style={draw, fill=blue!8, minimum width=22mm, minimum height=6mm,
+                    rounded corners=1pt}
+    ]
+    % three actors
+    \node[block] (py) at (0,0)  {Agent Python};
+    \node[block] (gw) at (5,0)  {Py4J Gateway};
+    \node[block] (sm) at (10,0) {SimulationManager};
+
+    \foreach \x in {0,5,10} \draw[lifeline] (\x,-0.4) -- (\x,-7.5);
+
+    % messages
+    \draw[msg] (0,-1)   -- node[above,font=\scriptsize]{\texttt{step(action)}}     (5,-1);
+    \draw[msg] (5,-1.6) -- node[above,font=\scriptsize]{\texttt{actionQueue.put}}  (10,-1.6);
+
+    \node[draw, fill=orange!10, minimum width=30mm, anchor=west, font=\scriptsize]
+      at (8.5,-2.5) {allocateTask + advanceEnergy};
+    \node[draw, fill=orange!10, minimum width=30mm, anchor=west, font=\scriptsize]
+      at (8.5,-3.3) {computeReward + recordSnapshot};
+    \node[draw, fill=orange!10, minimum width=30mm, anchor=west, font=\scriptsize]
+      at (8.5,-4.1) {buildObservation};
+
+    \draw[msg] (10,-5)   -- node[above,font=\scriptsize]{\texttt{stepResultQueue.put}} (5,-5);
+    \draw[msg] (5,-5.6)  -- node[above,font=\scriptsize]{\texttt{StepResult} (obs, r, done)} (0,-5.6);
+
+    \node[draw, fill=green!10, anchor=west, font=\scriptsize]
+      at (-1.4,-6.5) {numpy.float32, action\_masks};
+
+    \draw[msg] (0,-7.2)  -- node[above,font=\scriptsize]{next \texttt{action}}  (5,-7.2);
+  \end{tikzpicture}
+  \caption{Sequence diagram cho một vòng lặp RL. Hai
+  \texttt{SynchronousQueue} ở phía Java đảm bảo simulation thread chỉ tiến
+  bước khi nhận được hành động hợp lệ.}
+  \label{fig:rl-sequence}
+\end{figure}
+
+% ============================================================
+\section{Lựa chọn giải pháp và biện luận}
+\label{sec:lua-chon-giai-phap}
+
+Bốn lựa chọn thiết kế lớn nhất của ELDAS được trình bày theo cùng một
+khuôn: nêu các phương án, so sánh ưu nhược điểm trên những tiêu chí thực
+tế, và chốt phương án kèm phần đánh đổi phải chấp nhận. Bảng
+\ref{tab:decision-matrix} ở cuối phần tổng hợp lại bốn quyết định.
+
+\subsection{Lựa chọn công cụ mô phỏng: KWOK vs.\ CloudSim Plus}
+\label{ssec:choose-sim}
+
+Hai lựa chọn để mô phỏng cluster có thể tạm dừng cho RL là CloudSim Plus
+và KWOK (\textit{Kubernetes WithOut Kubelet}). Ba điểm quyết định:
+
+\begin{enumerate}
+  \item \textbf{Tốc độ.} CloudSim Plus dùng \emph{discrete-event
+        simulation} -- có thể tua nhanh qua các khoảng không có sự kiện,
+        một episode $5\,000$ tác vụ chạy xong trong vài giây. KWOK chạy
+        ở thời gian thực, cùng episode đó sẽ tốn nhiều phút -- chậm hơn
+        hàng trăm lần, không phù hợp để huấn luyện hàng triệu bước.
+  \item \textbf{Mô hình năng lượng.} CloudSim Plus có sẵn mô hình công
+        suất CPU tuyến tính theo SPECpower; KWOK không có khái niệm
+        năng lượng nên phải tự cấy plugin.
+  \item \textbf{Tạm dừng/tiếp tục.} Vòng lặp RL phải dừng được tại mỗi
+        sự kiện ``tác vụ mới đến'' để chờ agent quyết định. CloudSim
+        Plus hỗ trợ sẵn cơ chế pause/resume; KWOK thì không.
+\end{enumerate}
+
+\textbf{Quyết định:} chọn \textbf{CloudSim Plus 8.5.7}.
+\textbf{Đánh đổi:} mô hình mạng đơn giản, không có \texttt{kubectl} thật,
+nên về sau muốn kiểm chứng trên cluster thật vẫn cần một bước port
+chính sách. Tuy nhiên do Lớp 3 đã được giữ rất gọn, chỉ cần thay phần
+backend Java là đủ -- code Python không phải sửa.
+
+\subsection{Lựa chọn cầu nối ngôn ngữ: Py4J vs.\ gRPC vs.\ REST}
+\label{ssec:choose-bridge}
+
+Bảng~\ref{tab:bridge-comparison} ở §2.5 đã so sánh chi tiết. Ba lý do
+chính khiến Py4J phù hợp nhất cho ELDAS:
+\begin{itemize}
+  \item \textbf{Gọn nhẹ.} Mỗi bước RL chỉ trao đổi vài chục số thực --
+        nhỏ hơn nhiều so với phần header và phần JSON parsing mà REST
+        hay gRPC cộng thêm.
+  \item \textbf{Tần suất cao.} Phase 2 sẽ gọi \texttt{step()} hàng triệu
+        lần. Với REST ($\sim 5$\,ms mỗi lần), riêng giao tiếp đã tốn vài
+        giờ; với Py4J ($\sim 0{,}1$\,ms) chỉ còn chục phút.
+  \item \textbf{Truy cập trực tiếp đối tượng Java.} Py4J cho phép Python
+        gọi thẳng phương thức của đối tượng Java mà không phải định
+        nghĩa \texttt{.proto} hay OpenAPI schema -- giảm đáng kể boilerplate.
+\end{itemize}
+
+\textbf{Quyết định:} chọn \textbf{Py4J 0.10.9.7}. \textbf{Đánh đổi:} hai
+container phải nằm trong cùng mạng Docker, không thể chạy trên hai máy
+khác nhau -- ELDAS chấp nhận giới hạn này vì phạm vi đồ án chỉ chạy
+trong phòng thí nghiệm.
+
+\subsection{Lựa chọn thuật toán RL: PPO vs.\ DQN vs.\ A2C}
+\label{ssec:choose-rl}
+
+Mục~\ref{sec:morl} đã giới thiệu PPO; ở đây so sánh ba ứng cử viên trên
+ba tính chất bắt buộc của bài toán:
+\begin{enumerate}
+  \item \textbf{Hỗ trợ action masking.} Tại mỗi bước, không phải host
+        nào cũng đủ tài nguyên cho task hiện tại, nên agent phải bị
+        cấm cứng khỏi các host không khả thi. PPO có biến thể
+        \texttt{MaskablePPO} (\texttt{sb3-contrib}) hỗ trợ sẵn; DQN
+        phải tự sửa cả bước chọn action lẫn bước Bellman; A2C không
+        có triển khai mask sẵn dùng.
+  \item \textbf{Ổn định khi reward thưa và lệch tỉ lệ.} Reward
+        năng lượng luôn âm cỡ vài trăm, còn reward SLA gần như $0$
+        ở hầu hết các bước. DQN dễ bị overestimate giá trị Q khi
+        reward lệch tỉ lệ; PPO có hai cơ chế bù lại là chuẩn hoá
+        advantage và cắt tỉ số chính sách.
+  \item \textbf{Dễ song song hoá.} Phase 2 sẽ huấn luyện nhiều agent
+        cùng lúc (mỗi agent một trọng số khác nhau). PPO on-policy
+        chạy nhiều môi trường song song rất tự nhiên; DQN với replay
+        buffer cần kiến trúc phức tạp hơn nhiều.
+\end{enumerate}
+
+\textbf{Quyết định:} \textbf{PPO + MLP}, dùng \textbf{MaskablePPO} từ
+\texttt{sb3-contrib}. \textbf{Mục tiêu mở rộng:} có thể thay phần MLP
+bằng GNN ở giai đoạn sau -- chỉ đổi backbone, không cần đụng tới bốn
+lớp kiến trúc.
+
+\subsection{Lựa chọn chiến lược MORL: Linear Scalarization vs.\ NSGA-II}
+\label{ssec:choose-morl}
+
+\textbf{Linear scalarization} biến bài toán đa mục tiêu thành nhiều bài
+toán đơn mục tiêu: với mỗi trọng số $w$, agent học một chính sách tối ưu
+ở điểm cân bằng đó, quét nhiều trọng số rồi nối các điểm thu được lại
+sẽ ra Pareto front. \textbf{NSGA-II}~\cite{deb2002fast} là thuật toán
+tiến hoá sinh ra cả Pareto front trong một lần chạy. Tuy nhiên với
+ELDAS:
+\begin{itemize}
+  \item NSGA-II phải đánh giá hàng nghìn cá thể mỗi thế hệ -- mỗi cá thể
+        là một episode mô phỏng hoàn chỉnh. Tổng chi phí vượt xa ngân
+        sách thời gian của Phase 2.
+  \item Linear scalarization chỉ cần huấn luyện 9 chính sách độc lập
+        (với 9 giá trị $w$), dễ chạy song song trên nhiều CPU. Khi
+        triển khai thật, mỗi quyết định chỉ tốn một lượt forward
+        pass của mạng -- đủ nhanh cho online scheduling.
+  \item Linear scalarization không khám phá được phần lõm của Pareto
+        front -- hạn chế này đã nêu rõ ở §\ref{sec:morl}, và chấp nhận
+        được trong phạm vi đồ án.
+\end{itemize}
+
+\textbf{Quyết định:} \textbf{Linear scalarization} với weight sweep
+$w \in \{0{,}1,\,0{,}2,\,\dots,\,0{,}9\}$. NSGA-II và các thuật toán
+MORL chuyên dụng (Envelope-Q, Pareto-DQN) được liệt kê trong phần
+hướng phát triển tương lai.
+
+\subsection{Bảng tổng hợp ma trận quyết định}
+\begin{table}[H]
+  \centering
+  \caption{Ma trận quyết định bốn lựa chọn kiến trúc của ELDAS. Ký hiệu:
+  \checkmark\,= đáp ứng tốt, $\sim$\,= chấp nhận được, $\times$\,= không
+  đáp ứng.}
+  \label{tab:decision-matrix}
+  \footnotesize
+  \begin{tabular}{lccccccl}
+    \toprule
+    \textbf{Quyết định} & \textbf{Phương án} &
+      \textbf{Latency} & \textbf{Năng lượng} & \textbf{Pause/Resume} &
+      \textbf{Đa mục tiêu} & \textbf{Reproducible} & \textbf{Chốt} \\
+    \midrule
+    \multirow{2}{*}{Engine}   & CloudSim Plus     & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & $\bigstar$ \\
+                              & KWOK              & $\sim$     & $\times$   & $\times$   & \checkmark & \checkmark &            \\ \midrule
+    \multirow{3}{*}{Bridge}   & Py4J              & \checkmark & ---        & ---        & ---        & \checkmark & $\bigstar$ \\
+                              & gRPC              & $\sim$     & ---        & ---        & ---        & \checkmark &            \\
+                              & REST              & $\times$   & ---        & ---        & ---        & \checkmark &            \\ \midrule
+    \multirow{3}{*}{RL Algo}  & PPO + MaskablePPO & ---        & ---        & ---        & \checkmark & \checkmark & $\bigstar$ \\
+                              & DQN               & ---        & ---        & ---        & $\sim$     & \checkmark &            \\
+                              & A2C               & ---        & ---        & ---        & $\times$   & \checkmark &            \\ \midrule
+    \multirow{2}{*}{MORL}     & Linear scalar.    & ---        & ---        & ---        & $\sim$     & \checkmark & $\bigstar$ \\
+                              & NSGA-II           & $\times$   & ---        & ---        & \checkmark & \checkmark &            \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ============================================================
+\section{Thiết kế Lớp 2 — Phân hệ CloudSim Plus}
+\label{sec:layer-cloudsim}
+
+Lớp 2 là phần lớn nhất của hệ thống: khoảng $1\,800$ dòng Java chia
+thành chín lớp (Hình~\ref{fig:class-diagram}), mỗi lớp đảm nhiệm đúng
+một việc để dễ bảo trì và mở rộng.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+      font=\scriptsize,
+      cls/.style={draw, rectangle split, rectangle split parts=2,
+                  rectangle split part align=base, fill=blue!5,
+                  text width=36mm, align=left, rounded corners=1pt},
+      arrow/.style={-{Latex[length=1.5mm]}, thick, gray!70},
+      assoc/.style={thick, gray!70}
+    ]
+    \node[cls] (cfg) {\textbf{SimulationConfig}
+      \nodepart{second}
+        + DEFAULT\_HOST: HostSpec\\
+        + DEFAULT\_POWER: PowerSpec\\
+        + qosToLambda(qos): double};
+
+    \node[cls, right=10mm of cfg] (fac) {\textbf{DatacenterFactory}
+      \nodepart{second}
+        + create(sim, spec, reg): Datacenter\\
+        + GpuState: \{total, used\}\\
+        + gpuPowerWatt(state, spec): double};
+
+    \node[cls, right=10mm of fac] (mgr) {\textbf{SimulationManager}
+      \nodepart{second}
+        + resetSimulation(): StepResult\\
+        + step(hostIdx): StepResult\\
+        + getActionMask(): bool[]\\
+        + exportMetrics(dir): void};
+
+    \node[cls, below=8mm of cfg] (rdr) {\textbf{AlibabaTraceReader}
+      \nodepart{second}
+        + read(csv): List<TaskRecord>\\
+        + TaskRecord (record)};
+
+    \node[cls, right=10mm of rdr] (flt) {\textbf{ScenarioFilter}
+      \nodepart{second}
+        + filter(tasks, scen, seed)\\
+        + Scenario \{LOW,HIGH,BURST\}};
+
+    \node[cls, right=10mm of flt] (exp) {\textbf{MetricsExporter}
+      \nodepart{second}
+        + writeCsv(path, snaps)\\
+        + writeJson(path, summary)};
+
+    \node[cls, below=8mm of rdr] (k8s) {\textbf{VmAllocPolicy}\\\textbf{K8sDefault}
+      \nodepart{second}
+        + selectHostForTask()\\
+        + leastRequestedScore()};
+
+    \node[cls, right=10mm of k8s] (rnd) {\textbf{VmAllocPolicy}\\\textbf{Random}
+      \nodepart{second}
+        + selectHostForTask()};
+
+    \node[cls, right=10mm of rnd] (gw) {\textbf{GatewayEntryPoint}
+      \nodepart{second}
+        + reset(scen, seed)\\
+        + step(hostIdx)\\
+        + selectBaselineAction()};
+
+    % associations
+    \draw[arrow] (mgr) -- node[above,font=\tiny]{uses} (fac);
+    \draw[arrow] (mgr) -- node[left, font=\tiny]{uses} (rdr);
+    \draw[arrow] (mgr) |- (flt);
+    \draw[arrow] (mgr) |- (exp);
+    \draw[arrow] (gw)  -- node[left, font=\tiny]{wraps} (mgr);
+    \draw[arrow] (gw)  -| (k8s);
+    \draw[arrow] (gw)  -| (rnd);
+    \draw[arrow] (fac) |- node[right,font=\tiny]{reads} (cfg.east);
+  \end{tikzpicture}
+  \caption{Class diagram phân hệ Java. Mũi tên đậm biểu diễn quan hệ
+  \emph{depends-on}; \texttt{GatewayEntryPoint} là điểm vào duy nhất của
+  Python.}
+  \label{fig:class-diagram}
+\end{figure}
+
+\subsection{\texttt{SimulationConfig} -- cấu hình tập trung}
+\label{ssec:config}
+Mọi tham số của cluster được gom vào một file Java duy nhất, giúp việc
+tinh chỉnh và kiểm tra dễ dàng. Cấu hình mặc định mô phỏng một cụm
+gồm $10$ host, mỗi host có $64$ vCPU, $\SI{256}{GB}$ RAM, và $8$ GPU
+loại A100/V100. Công suất CPU lấy $400$\,W ở tải tối đa và $120$\,W
+khi rảnh; GPU tương ứng $300$\,W và $30$\,W (lấy từ tài liệu kỹ thuật
+nhà sản xuất). Bảng QoS $\to$ hệ số $\lambda$ trong reward SLA cũng
+được khai báo ở đây, ánh xạ bốn lớp QoS của Alibaba (LS, Guaranteed,
+Burstable, BE) sang các hệ số phạt $3{,}0$ -- $2{,}0$ -- $1{,}0$ --
+$0{,}5$ tương ứng.
+
+\subsection{\texttt{DatacenterFactory} và lớp theo dõi GPU}
+\label{ssec:factory}
+CloudSim Plus 8.5.7 chưa có khái niệm GPU. Để khỏi phải sửa thư viện
+gốc (sẽ phá vỡ tính tái sản xuất), ELDAS giữ một bảng riêng ánh xạ
+từng host sang trạng thái GPU của nó (tổng số GPU và số GPU đang dùng).
+Công suất GPU của host được tính theo cùng mô hình tuyến tính như CPU:
+số GPU đang dùng càng lớn thì công suất càng tiến gần mức tối đa, các
+GPU rảnh đóng góp công suất idle. Phép tính này được gọi mỗi bước mô
+phỏng và đưa vào tổng năng lượng cluster.
+
+\subsection{\texttt{AlibabaTraceReader} -- đọc trace}
+\label{ssec:trace}
+File trace \texttt{openb\_pod\_list\_default.csv} có $11$ trường, được
+ánh xạ sang một record Java đơn giản (Bảng~\ref{tab:trace-fields}). Hai
+trường dẫn xuất được sinh ngay khi parse: \textbf{deadline} bằng thời
+điểm K8s bind cộng với $110\%$ thời gian chạy thực tế (cho phép trễ
+$10\%$ trước khi tính vi phạm); và \textbf{slaLambda} là hệ số phạt
+theo QoS, lấy từ bảng đã khai báo ở §\ref{ssec:config}. Các bản ghi
+có \texttt{podPhase = Pending} hoặc thiếu trường bắt buộc sẽ bị bỏ
+qua kèm cảnh báo, không huỷ toàn bộ quá trình import.
+
+\begin{table}[H]
+  \centering
+  \caption{Ánh xạ trường Alibaba trace $\to$ đối tượng \texttt{TaskRecord}.}
+  \label{tab:trace-fields}
+  \small
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Trường CSV}      & \textbf{Trường \texttt{TaskRecord}} & \textbf{Ngữ nghĩa} \\
+    \midrule
+    \texttt{name}            & \texttt{name}        & Mã định danh tác vụ \\
+    \texttt{cpu\_milli}      & \texttt{pesNeeded()} & $\lceil x/1000 \rceil$ PE \\
+    \texttt{memory\_mib}     & \texttt{memoryMib}   & RAM yêu cầu (MiB) \\
+    \texttt{num\_gpu}        & \texttt{numGpu}      & Số GPU nguyên \\
+    \texttt{gpu\_milli}      & \texttt{gpuMilli}    & Tỉ phần GPU (1000 = full card) \\
+    \texttt{qos}             & \texttt{slaLambda}   & $\to \lambda \in \{0{,}5,\,1,\,2,\,3\}$ \\
+    \texttt{creation\_time}  & \texttt{creationTime}& Thời điểm xuất hiện (giây) \\
+    \texttt{deletion\_time}  & \texttt{deletionTime}& Thời điểm kết thúc thực tế \\
+    \texttt{scheduled\_time} & \texttt{scheduledTime}& Thời điểm K8s bind ban đầu \\
+    \multicolumn{2}{l}{(dẫn xuất) \texttt{deadline}}& $= \mathrm{scheduledTime} + 1{,}1\,\Delta_{\mathrm{run}}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{\texttt{ScenarioFilter} -- ba kịch bản tải}
+\label{ssec:scenario}
+Để bộc lộ ba chế độ vận hành khác biệt, \texttt{ScenarioFilter} cắt trace
+đầy đủ thành ba tập:
+\begin{itemize}
+  \item \textsc{Low}: $25\%$ tác vụ đầu tiên theo \texttt{creationTime} --
+        kiểm tra hành vi scheduler khi cluster nhàn rỗi (vùng năng lượng
+        kém hiệu quả nhất theo SPECpower).
+  \item \textsc{High}: toàn bộ tác vụ \texttt{podPhase $\neq$ Pending} --
+        kịch bản tham chiếu, có khả năng làm bão hoà cluster.
+  \item \textsc{Burst}: chỉ giữ tác vụ thuộc các cửa sổ thời gian
+        $1$\,giờ có cường độ đến vượt percentile $80$ -- kiểm tra hành vi
+        khi cluster bị \emph{shock}.
+\end{itemize}
+Tất cả ba kịch bản đều dùng cùng \texttt{seed} cho \texttt{Random},
+đảm bảo tính lặp lại giữa các lần chạy.
+
+\subsection{\texttt{SimulationManager} -- ghép mô phỏng vào vòng lặp RL}
+\label{ssec:sim-manager}
+
+Đây là lớp phức tạp nhất ở Lớp 2: nó điều phối nhịp giữa mô phỏng và
+nhịp ra quyết định của agent. Hình~\ref{fig:lifecycle} mô tả luồng trạng
+thái trong một episode. Hai luồng (thread mô phỏng phía Java và thread
+nhận lệnh từ Python) trao đổi với nhau qua hai hàng đợi đồng bộ: một
+hàng đợi để Python gửi hành động sang, một hàng đợi để Java trả về quan
+sát và phần thưởng. Hai hàng đợi này được thiết kế sao cho mỗi lần
+\texttt{step()} là một giao dịch hoàn chỉnh -- không cần khoá tường minh
+mà vẫn loại bỏ được điều kiện đua giữa hai thread.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+      font=\scriptsize, node distance=8mm and 12mm,
+      state/.style={draw, rounded corners=2pt, minimum width=22mm,
+                    minimum height=8mm, align=center, fill=blue!8},
+      term/.style ={draw, ellipse, minimum width=18mm, fill=green!10},
+      arrow/.style={-{Latex[length=2mm]}, thick}
+    ]
+    \node[term] (init) {Initial};
+    \node[state, right=of init]  (build) {buildSim\\(DC, broker, trace)};
+    \node[state, right=of build] (emit)  {emit obs\_0\\(reward = 0)};
+    \node[state, below=of emit]  (wait)  {actionQueue\\.take()};
+    \node[state, left=of wait]   (apply) {allocateTask +\\advanceEnergy};
+    \node[state, left=of apply]  (rew)   {compute\\Reward};
+    \node[state, below=of rew]   (snap)  {recordSnapshot\\++currentTaskIdx};
+    \node[state, right=of snap]  (push)  {stepResultQueue\\.put()};
+    \node[term,  right=of push]  (done)  {Episode done};
+
+    \draw[arrow] (init)--(build);
+    \draw[arrow] (build)--(emit);
+    \draw[arrow] (emit)--(wait);
+    \draw[arrow] (wait)--(apply);
+    \draw[arrow] (apply)--(rew);
+    \draw[arrow] (rew)--(snap);
+    \draw[arrow] (snap)--(push);
+    \draw[arrow] (push) -| node[below,pos=0.25,font=\tiny]
+                          {if more tasks} (wait);
+    \draw[arrow] (push)--(done);
+  \end{tikzpicture}
+  \caption{Vòng đời \texttt{SimulationManager} trong một episode. Hai vùng
+  ``actionQueue.take'' và ``stepResultQueue.put'' là hai điểm đồng bộ giữa
+  thread mô phỏng và thread Py4J.}
+  \label{fig:lifecycle}
+\end{figure}
+
+\textbf{Một lưu ý thiết kế quan trọng.} Trong Phase 1, ELDAS \textbf{không
+khởi động đồng hồ CloudSim}. Thay vào đó, \texttt{SimulationManager} tự
+theo dõi tài nguyên đã cấp (CPU và RAM) bằng hai bảng băm riêng. Lý do:
+nếu bật đồng hồ mô phỏng khi chưa đăng ký đầy đủ các listener, JVM có thể
+crash âm thầm do sự kiện không có handler. Hệ quả thực tế là Phase 1 không
+đo được thời gian hoàn thành theo đồng hồ mô phỏng (mọi deadline được suy
+từ trace), điều này được nêu rõ ở §5.5 và sẽ được khắc phục đầu Phase 2.
+
+\textbf{Reward được tính ngay tại Java}, sát với mô hình đã phát biểu ở
+Chương~\ref{chap:gioi-thieu}: phần năng lượng tính từ công suất CPU và
+GPU hiện tại của host nhân với độ dài một bước scheduling (lấy dấu âm
+để biến thành reward); phần SLA tính từ độ trễ ước lượng vượt deadline,
+nhân với hệ số $\lambda$ tuỳ theo QoS. Hai giá trị này được trả về dưới
+dạng mảng hai phần tử để giữ nguyên tính chất \textit{vector reward}
+của MOMDP.
+
+% ============================================================
+\section{Thiết kế Lớp 3 — Py4J Gateway}
+\label{sec:layer-py4j}
+
+\subsection{API surface tối giản}
+Lớp Gateway \emph{cố ý} chỉ phơi ra một bề mặt nhỏ: $9$ phương thức công
+khai, không trả về đối tượng CloudSim nào trực tiếp. Bảng~\ref{tab:gw-api}
+liệt kê toàn bộ contract.
+
+\begin{table}[H]
+  \centering
+  \caption{API công khai của \texttt{GatewayEntryPoint}. Mọi tham số/giá
+  trị trả về đều là kiểu nguyên thuỷ, mảng nguyên thuỷ, hoặc Java
+  \texttt{record} đơn giản -- thân thiện với Py4J và serializable cô lập.}
+  \label{tab:gw-api}
+  \footnotesize
+  \begin{tabularx}{\linewidth}{l l X}
+    \toprule
+    \textbf{Phương thức} & \textbf{Trả về} & \textbf{Mô tả} \\
+    \midrule
+    \texttt{reset(scenario, seed)} & \texttt{StepResult} & Khởi tạo lại
+        simulation, trả về quan sát ban đầu.\\
+    \texttt{step(hostIndex)}        & \texttt{StepResult} & Áp hành động,
+        trả về $(s_{t+1}, \mathbf{r}_t, d_t)$.\\
+    \texttt{getActionMask()}        & \texttt{boolean[]}  & Mask hợp lệ cho
+        bước hiện tại.\\
+    \texttt{getActionSize()}        & \texttt{int}        & $|\mathcal{A}|$
+        = số host.\\
+    \texttt{getObservationSize()}   & \texttt{int}        & $3H + 4$.\\
+    \texttt{getTotalEnergyKwh()}    & \texttt{double}     & Năng lượng tích
+        luỹ (kWh) -- dùng cho early-stop.\\
+    \texttt{selectBaselineAction(p)}& \texttt{int}        & Chỉ số host do
+        baseline (\texttt{"k8s"}/\texttt{"random"}) chọn.\\
+    \texttt{exportMetrics(dir)}     & \texttt{void}       & Ghi
+        \texttt{metrics.csv} + \texttt{summary.json}.\\
+    \texttt{shutdown()}             & \texttt{void}       & Dừng simulation,
+        không tắt \texttt{GatewayServer}.\\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\textbf{Bất biến hợp đồng:} mọi state đều thuộc về \texttt{SimulationManager}
+phía Java; phía Python \emph{không cache} trạng thái. Mỗi
+\texttt{StepResult} là một \texttt{record} bất biến; sau khi nhận, Python
+chỉ thực hiện một lần chuyển đổi sang \texttt{numpy.ndarray} (clipping vào
+$[0,1]$ để chống nhiễu số học) rồi đẩy ngay cho agent. Điều này loại bỏ
+hoàn toàn các bug đồng bộ trạng thái Java/Python.
+
+\subsection{Khởi động Gateway và kết nối client}
+Phía Java, \texttt{GatewayServer} được bind vào địa chỉ \texttt{0.0.0.0}
+(không phải \texttt{localhost}) để container Python trong cùng mạng
+Docker có thể kết nối được. Cổng mặc định lấy từ biến môi trường
+\texttt{PY4J\_PORT} (giá trị $25333$).
+
+Phía Python, môi trường mở kết nối tới gateway ngay khi khởi tạo và có
+cơ chế \textbf{retry với chờ đợi tăng dần} để xử lý khoảng vài giây
+giữa lúc Docker đánh dấu Java healthy và lúc port thực sự sẵn sàng. Nếu
+sau $10$ lần thử vẫn không kết nối được thì báo lỗi rõ ràng cho người
+dùng. Tham số \texttt{auto\_convert=True} của Py4J giúp tự ép kiểu giữa
+Python và Java: \texttt{int} truyền thẳng, mảng Java \texttt{double[]}
+trả về thành \texttt{list} Python -- giảm đáng kể boilerplate ở phía
+agent.
+
+% ============================================================
+\section{Thiết kế Lớp 4 — MO-Gymnasium Environment}
+\label{sec:layer-mogym}
+
+\subsection{Observation space}
+\label{ssec:obs-space}
+Quan sát được biểu diễn bằng vector phẳng dài $3H + 4$, đã được Java chuẩn
+hoá về $[0,1]$ và Python clip lại để chống lỗi số học (Hình~\ref{fig:obs}).
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+      font=\scriptsize, node distance=0mm,
+      cell/.style={draw, minimum width=12mm, minimum height=7mm, align=center},
+      cpu/.style ={cell, fill=blue!10},
+      mem/.style ={cell, fill=green!10},
+      gpu/.style ={cell, fill=orange!10},
+      task/.style={cell, fill=red!12}
+    ]
+    % CPU block
+    \node[cpu] (c0) {$u^{\mathrm{cpu}}_1$};
+    \node[cpu, right=of c0] (c1) {$u^{\mathrm{cpu}}_2$};
+    \node[cpu, right=of c1] (cd) {\dots};
+    \node[cpu, right=of cd] (cH) {$u^{\mathrm{cpu}}_H$};
+    % MEM
+    \node[mem, right=2mm of cH] (m0) {$u^{\mathrm{ram}}_1$};
+    \node[mem, right=of m0] (md) {\dots};
+    \node[mem, right=of md] (mH) {$u^{\mathrm{ram}}_H$};
+    % GPU
+    \node[gpu, right=2mm of mH] (g0) {$u^{\mathrm{gpu}}_1$};
+    \node[gpu, right=of g0] (gd) {\dots};
+    \node[gpu, right=of gd] (gH) {$u^{\mathrm{gpu}}_H$};
+    % TASK (next row)
+    \node[task, below=10mm of c0]      (t1) {$\hat r^{\mathrm{cpu}}$};
+    \node[task, right=of t1]           (t2) {$\hat r^{\mathrm{ram}}$};
+    \node[task, right=of t2]           (t3) {$\hat r^{\mathrm{gpu}}$};
+    \node[task, right=of t3]           (t4) {$\lambda/3$};
+
+    % braces
+    \draw[decorate, decoration={brace,amplitude=4pt}, thick]
+      (c0.north west) -- node[above=4pt,font=\scriptsize]{$H$ host CPU} (cH.north east);
+    \draw[decorate, decoration={brace,amplitude=4pt}, thick]
+      (m0.north west) -- node[above=4pt,font=\scriptsize]{$H$ RAM}      (mH.north east);
+    \draw[decorate, decoration={brace,amplitude=4pt}, thick]
+      (g0.north west) -- node[above=4pt,font=\scriptsize]{$H$ GPU}      (gH.north east);
+    \draw[decorate, decoration={brace,amplitude=4pt}, thick]
+      (t4.south east) -- node[below=4pt,font=\scriptsize]{4 task features} (t1.south west);
+  \end{tikzpicture}
+  \caption{Cấu trúc vector quan sát $(3H + 4)$ chiều. Ba khối host được sắp
+  liên tiếp theo loại tài nguyên; bốn ô cuối mô tả tác vụ kế tiếp cần
+  được xếp lịch.}
+  \label{fig:obs}
+\end{figure}
+
+Việc \emph{nhóm theo loại tài nguyên} (toàn bộ CPU, rồi toàn bộ RAM, rồi
+toàn bộ GPU) thay vì \emph{nhóm theo host} (CPU--RAM--GPU của host 1, rồi
+host 2, …) là một quyết định có chủ đích: lớp ẩn của MLP học các tương
+tác \emph{trong cùng loại tài nguyên} dễ hơn (ví dụ host nào có CPU thấp
+nhất). Khi chuyển sang GNN ở stretch goal, cấu trúc này được \texttt{reshape}
+về ma trận $H \times 3$ một cách tự nhiên.
+
+\subsection{Action space và action masking}
+\label{ssec:action-space}
+Không gian hành động đơn giản: là chỉ số host (từ $0$ đến $H-1$) mà
+agent muốn đặt tác vụ hiện tại lên. Mỗi bước, môi trường gọi sang Java
+để lấy về một mask boolean dài $H$: phần tử thứ $j$ bằng \texttt{true}
+nếu host $j$ còn đủ CPU, RAM và GPU cho tác vụ, ngược lại bằng
+\texttt{false}. MaskablePPO áp mask này lên đầu ra của policy, đảm bảo
+agent không bao giờ chọn host không đủ tài nguyên. Trường hợp đặc biệt
+khi không host nào chứa nổi tác vụ (toàn bộ mask đều \texttt{false}),
+phía Python bật lại toàn bộ mask để tránh agent bị ``khoá cứng''.
+
+\subsection{Vector reward và linear scalarization}
+\label{ssec:reward}
+Mỗi bước, môi trường trả về reward dưới dạng vector hai phần tử: phần
+năng lượng (luôn âm, bằng phần năng lượng tiêu thụ thêm trong bước đó
+đổi dấu) và phần SLA (âm nếu vi phạm deadline, $0$ nếu đúng hạn). Để
+chạy được với PPO chuẩn, ELDAS cung cấp một wrapper
+(\texttt{ScalarRewardWrapper}) cộng hai thành phần lại theo trọng số
+$(w_{\mathrm{e}},\,w_{\mathrm{s}})$ với $w_{\mathrm{e}} + w_{\mathrm{s}}
+= 1$. Trọng số mặc định là $(0{,}8;\,0{,}2)$; Phase 2 sẽ quét
+$w_{\mathrm{e}} \in \{0{,}1,\,\dots,\,0{,}9\}$ để tạo Pareto front. Khi
+cần benchmark thuật toán MORL chuyên dụng, bỏ wrapper là môi trường lại
+trả thẳng vector reward về cho thuật toán -- không phải sửa code Java.
+
+\subsection{Điều kiện kết thúc episode}
+\texttt{terminated\,=\,True} khi và chỉ khi mọi tác vụ trong tập
+\texttt{tasks} đã được phân bổ (\texttt{currentTaskIdx == tasks.size()}).
+\texttt{truncated} luôn bằng \texttt{False} ở Phase 1 do bài toán có chân
+trời hữu hạn tự nhiên (số tác vụ cố định sau khi \texttt{ScenarioFilter}
+cắt). Ở Phase 2, ELDAS có thể bật \texttt{truncated\,=\,True} khi vượt
+\texttt{max\_steps} để giới hạn chi phí của các chính sách tồi.
+
+\subsection{Tóm tắt vòng lặp}
+Một episode hoàn chỉnh theo đúng chuẩn Gymnasium gồm bốn bước lặp đi
+lặp lại: (1) gọi \texttt{action\_masks()} để biết các host khả thi,
+(2) policy chọn host hợp lệ, (3) gọi \texttt{step(action)} để nhận
+quan sát và reward mới, (4) kiểm tra điều kiện kết thúc. Sau khi
+episode kết thúc, gọi \texttt{export\_metrics()} để Java ghi
+\texttt{metrics.csv} và \texttt{summary.json} ra volume kết quả.
+
+% ============================================================
+\section{Thiết kế Lớp 1 — Docker Compose Infrastructure}
+\label{sec:layer-docker}
+
+\subsection{Bố trí container và volume}
+Hai container được nối qua mạng nội bộ \texttt{sim-net} và dùng chung
+ba volume (Hình~\ref{fig:docker-topo}). Volume chứa trace được mount
+\textbf{chỉ đọc} cho \texttt{cloudsim-java} -- Java không có quyền ghi
+đè dữ liệu thực nghiệm, tránh tình huống vô tình hỏng trace gốc trong
+quá trình debug.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+      font=\scriptsize, node distance=8mm and 14mm,
+      svc/.style ={draw, rounded corners=2pt, minimum width=42mm,
+                   minimum height=18mm, align=center, fill=blue!8},
+      vol/.style ={draw, rounded corners=2pt,
+                   minimum width=22mm, minimum height=10mm,
+                   align=center, fill=yellow!25},
+      net/.style ={draw, dashed, rounded corners=2pt,
+                   inner sep=4mm, fill=gray!5},
+      arrow/.style={-{Latex[length=2mm]}, thick}
+    ]
+    \node[svc] (java) {\textbf{cloudsim-java}\\(JRE 21, $\sim$380\,MB)\\
+                       \texttt{:25333}};
+    \node[svc, right=22mm of java] (py) {\textbf{rl-agent}\\
+                       (Python 3.11.9)\\client only};
+    \begin{pgfonlayer}{background}
+      \node[net, fit=(java)(py),
+            label={[anchor=north,yshift=-1mm,font=\scriptsize\itshape]
+                   north:bridge \texttt{sim-net}}] (net) {};
+    \end{pgfonlayer}
+
+    \node[vol, below=of java]               (vt) {trace-data\\(:ro)};
+    \node[vol, below=of $(java.south)!0.5!(py.south)$] (vr) {results};
+    \node[vol, below=of py]                 (vm) {model-store};
+
+    \draw[arrow] (java) -- (vt);
+    \draw[arrow] (java) -- (vr);
+    \draw[arrow] (py)   -- (vr);
+    \draw[arrow] (py)   -- (vm);
+    \draw[arrow, {Latex[length=2mm]}-{Latex[length=2mm]}]
+      (py.west) to[bend right=10] node[above,font=\tiny]
+        {Py4J TCP :25333} (java.east);
+  \end{tikzpicture}
+  \caption{Topology Docker Compose. \texttt{rl-agent} không expose port
+  nào (client thuần); \texttt{cloudsim-java} chỉ expose
+  \texttt{\$PY4J\_PORT}.}
+  \label{fig:docker-topo}
+\end{figure}
+
+\subsection{Multi-stage build và tối ưu kích thước image}
+Cả hai Dockerfile đều dùng pattern \textbf{multi-stage}: một stage chứa
+các công cụ biên dịch nặng (Maven, gcc, …), stage còn lại chỉ giữ lại
+phần runtime tối thiểu. Nhờ đó, image \texttt{cloudsim-java} giảm từ
+khoảng $1{,}1$\,GB xuống $\sim 380$\,MB, image \texttt{rl-agent} cũng
+giảm tương tự so với base \texttt{python:3.11}. Một mẹo nhỏ nhưng quan
+trọng: copy file khai báo dependency (\texttt{pom.xml},
+\texttt{requirements.txt}) \emph{trước} khi copy source code -- nếu các
+file này không đổi thì Docker tái sử dụng layer cache, mỗi lần build
+lại tiết kiệm $1$--$2$ phút.
+
+\subsection{Healthcheck và thứ tự khởi động}
+Để tránh điều kiện đua khi khởi động, \texttt{cloudsim-java} có
+healthcheck kiểm tra cổng Py4J ($25333$) đã lắng nghe chưa, còn
+\texttt{rl-agent} được khai báo phải đợi service Java sẵn sàng trước
+khi chạy. Docker Compose lo phần đó. Cơ chế retry ở phía Python (mô tả
+ở §\ref{sec:layer-py4j}) là lớp phòng vệ thứ hai, dành cho khoảng vài
+giây ngắn giữa lúc cổng mở và lúc gateway hoàn tất bind.
+
+\subsection{Tính tái sản xuất}
+ELDAS bảo đảm \textbf{tái sản xuất kết quả}: cùng \texttt{RANDOM\_SEED}
+sẽ cho cùng phân chia tác vụ giữa các kịch bản, cùng thứ tự lấy mẫu của
+baseline ngẫu nhiên, và cùng dãy hành động cho mỗi lần chạy. Mọi phụ
+thuộc đều được ghim phiên bản cứng: Java 21 (eclipse-temurin), Maven
+3.9.9, CloudSim Plus 8.5.7, py4j 0.10.9.7 ở phía Java; Python 3.11.9,
+mo-gymnasium 1.3.2, stable-baselines3 2.7.0 ở phía Python. Riêng
+\texttt{gymnasium} cố ý không pin để pip tự giải xung đột giữa SB3 và
+MO-Gym.
+
+% ============================================================
+\section{Tổng kết chương}
+\label{sec:ket-luan-c3}
+
+Chương này đã trình bày kiến trúc bốn lớp của ELDAS và giải thích lý do
+chọn từng công nghệ cốt lõi. Bảng~\ref{tab:requirement-trace} liệt kê
+các mục tiêu của Chương~\ref{chap:gioi-thieu} và thành phần kiến trúc
+chịu trách nhiệm cho từng mục tiêu -- bằng chứng rằng mọi mục tiêu đều
+có chỗ ``đáp xuống'' trong thiết kế.
+
+\begin{table}[H]
+  \centering
+  \caption{Ánh xạ ngược từ mục tiêu Phase 1 (§\ref{sec:muc-tieu}) sang
+  thành phần kiến trúc.}
+  \label{tab:requirement-trace}
+  \footnotesize
+  \begin{tabularx}{\linewidth}{l X l}
+    \toprule
+    \textbf{Mục tiêu} & \textbf{Mô tả ngắn} & \textbf{Thành phần} \\
+    \midrule
+    MT1 & Engine mô phỏng + năng lượng + GPU tracking
+        & §\ref{sec:layer-cloudsim} (Lớp 2) \\
+    MT2 & Tích hợp Alibaba trace + 3 kịch bản
+        & §\ref{ssec:trace}, §\ref{ssec:scenario} \\
+    MT3 & Cầu Java--Python với pause/resume/reset
+        & §\ref{sec:layer-py4j} (Lớp 3) + §\ref{ssec:sim-manager} \\
+    MT4 & MO-Gym env + vector reward + action masking
+        & §\ref{sec:layer-mogym} (Lớp 4) \\
+    MT5 & Hai baseline scheduler
+        & \texttt{VmAllocationPolicy}\{K8sDefault, Random\} \\
+    MT6 & Đóng gói Docker Compose tái sản xuất
+        & §\ref{sec:layer-docker} (Lớp 1) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Ba điểm nổi bật của kiến trúc:
+(i)~\textbf{Tách rời rõ ràng giữa các lớp} -- có thể thay engine mô
+phỏng hoặc thuật toán RL độc lập, không phải động đến phần còn lại;
+(ii)~\textbf{Vòng lặp RL chạy nguyên tử} -- hai hàng đợi đồng bộ phía
+Java và action mask phía Python loại bỏ điều kiện đua mà không cần
+khoá tường minh;
+(iii)~\textbf{Tái sản xuất được kết quả} -- seed chung, version cứng,
+và Docker image bất biến đảm bảo chạy lại trên máy khác vẫn ra cùng số.
+
+Chương kế tiếp sẽ trình bày chi tiết hiện thực ở mức code: parse CSV,
+walk-through hai baseline scheduler, hành vi của \texttt{MetricsExporter},
+và smoke-test xác nhận vòng RL hoàn chỉnh qua bốn lớp chạy đúng.

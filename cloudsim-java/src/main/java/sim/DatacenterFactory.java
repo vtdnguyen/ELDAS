@@ -91,13 +91,17 @@ public final class DatacenterFactory {
         List<Host> hosts = new ArrayList<>(dcSpec.hostCount());
 
         for (int i = 0; i < dcSpec.hostCount(); i++) {
-            Host host = createHost(hs, ps);
-            hosts.add(host);
-            gpuRegistry.put(host, new GpuState(hs.gpuCount()));
+            hosts.add(createHost(hs, ps));
         }
 
         DatacenterSimple dc = new DatacenterSimple(simulation, hosts, policy);
         dc.setSchedulingInterval(dcSpec.schedulingIntervalSec());
+
+        // Populate GPU registry AFTER datacenter creation so that Host objects
+        // have been registered and their identity is stable for map lookups.
+        for (Host host : dc.getHostList()) {
+            gpuRegistry.put(host, new GpuState(hs.gpuCount()));
+        }
 
         System.out.printf("[DatacenterFactory] Created datacenter: %d hosts, "
                         + "%d PEs/host, %d GPUs/host%n",

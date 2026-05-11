@@ -1,0 +1,257 @@
+                                           
+============================================================
+  ELDAS collect_all_data.py
+  Root:    D:\HCMUT-uni\252\DACn\ELDAS
+  Results: D:\HCMUT-uni\252\DACn\ELDAS\data\results
+  Figures: D:\HCMUT-uni\252\DACn\ELDAS\assets\report\figures
+============================================================
+
+────────────────────────────────────────────────────────────
+[collect] Step 1 — Smoke test (LOW, 3000 steps)
+  $ docker compose run --rm rl-agent python src/smoke_test.py --scenario LOW --max-steps 3000 --output /data/results/smoke
+────────────────────────────────────────────────────────────
+[+] Creating 1/1
+ ✔ Container cloudsim  Running                                                                                          0.0s 
+╔══════════════════════════════════════════════════════════════════════╗
+║       ELDAS Smoke Test — T4.5 — Full RL Loop via Py4J              ║
+╚══════════════════════════════════════════════════════════════════════╝
+ℹ Scenario: LOW
+ℹ Seed: 42
+ℹ Max steps: 3000
+[environment] Connected to Py4J gateway cloudsim-java:25333 (attempt 1)
+
+══════════════════════════════════════════════════════════════════════
+  Phase 1: Py4J Connection
+══════════════════════════════════════════════════════════════════════
+ℹ Gateway endpoint: cloudsim-java:25333
+✓ Got 10 hosts from Java
+✓ Action space size = num hosts (10)
+✓ Observation shape = (3H+4,) = (34,)
+
+══════════════════════════════════════════════════════════════════════
+  Phase 2: Reset
+══════════════════════════════════════════════════════════════════════
+✓ Observation has correct shape (34,)
+✓ Observation dtype is float32
+✓ Observation is within declared space [0, 1]
+✓ All observation values are in [0, 1]
+✓ Initial task index = 0
+✓ Info contains scenario: LOW
+ℹ Initial obs sample: [0.0, 0.0, 0.0, 0.0, 0.0] ...
+ℹ Task name: openb-pod-0000
+
+══════════════════════════════════════════════════════════════════════
+  Phase 3: Action Mask
+══════════════════════════════════════════════════════════════════════
+✓ Mask shape matches num hosts (10)
+✓ Mask dtype is bool
+✓ At least one host is feasible
+ℹ Feasible hosts: 10/10
+ℹ Mask: [True, True, True, True, True, True, True, True, True, True]
+
+══════════════════════════════════════════════════════════════════════
+  Phase 4: Single Step
+══════════════════════════════════════════════════════════════════════
+ℹ Taking action: place task on host 0
+✓ Step obs has correct shape
+✓ Step obs is in space
+✓ Reward is vector of shape (2,)
+✓ Reward dtype is float32
+✓ R_energy ≤ 0 (got -682.5000)
+✓ R_sla ≤ 0 (got -0.0000)
+✓ terminated is bool
+✓ truncated is False (no time limit)
+✓ info contains raw_reward
+ℹ Reward vector: [R_energy=-682.5000, R_sla=-0.0000]
+ℹ Task index after step: 1
+
+══════════════════════════════════════════════════════════════════════
+  Phase 5: Full Episode  (tasks=1813, max_steps=3000, full=yes)
+══════════════════════════════════════════════════════════════════════
+  step     0/1813: action= 0, R_energy= -682.5000, R_sla= -0.0000
+  step   181/1813: action= 0, R_energy=-2800.0000, R_sla= -0.0000
+  step   362/1813: action= 0, R_energy=-2800.0000, R_sla= -0.0000
+  step   543/1813: action= 0, R_energy=-2800.0000, R_sla= -0.0000
+  step   724/1813: action= 0, R_energy=-2800.0000, R_sla= -0.0000
+  step   905/1813: action= 0, R_energy=-2800.0000, R_sla= -0.0000
+  step  1086/1813: action= 0, R_energy=-2800.0000, R_sla= -0.0000
+  step  1267/1813: action= 0, R_energy=-2800.0000, R_sla= -0.0000
+  step  1448/1813: action= 0, R_energy=-2800.0000, R_sla= -0.0000
+  step  1629/1813: action= 0, R_energy=-2800.0000, R_sla= -0.0000
+  step  1810/1813: action= 0, R_energy=-2800.0000, R_sla= -0.0000
+✓ R_energy < -120 (idle) in at least one step — manual PE tracking is working (got -2800.00)
+✓ Ran 1813 steps in 28.1s (65 steps/sec)
+✓ Episode terminated naturally after 1813 steps
+ℹ Total energy: 23362.573921 kWh
+ℹ R_energy sum: -4994925.50
+ℹ R_sla sum:    0.00
+
+══════════════════════════════════════════════════════════════════════
+  Phase 6: Metrics Export
+══════════════════════════════════════════════════════════════════════
+ℹ Exported to /data/results/smoke
+✓ Java MetricsExporter wrote files (check /data/results/smoke/metrics.csv and summary.json)
+
+══════════════════════════════════════════════════════════════════════
+  Phase 8: Baseline Action Selection
+══════════════════════════════════════════════════════════════════════
+✓ K8s baseline returned valid action: 0
+✓ Random baseline returned valid action: 0
+
+══════════════════════════════════════════════════════════════════════
+  Phase 7: ScalarRewardWrapper
+══════════════════════════════════════════════════════════════════════
+[environment] Connected to Py4J gateway cloudsim-java:25333 (attempt 1)
+✓ Wrapped reward is float, got float
+✓ Scalar = w·r (-477.7500 ≈ -477.7500)
+
+══════════════════════════════════════════════════════════════════════
+  ✓ ALL SMOKE TESTS PASSED
+══════════════════════════════════════════════════════════════════════
+The full RL loop is operational.
+
+Next steps:
+  • Run baselines:  python src/baseline_eval.py --scenario HIGH
+  • Start training: (Phase 2 — P2.1)
+
+────────────────────────────────────────────────────────────
+[collect] Step 2 — Baseline: LOW
+  $ docker compose run --rm rl-agent python src/baseline_eval.py --scenario LOW --seed 42 --output /data/results
+────────────────────────────────────────────────────────────
+[+] Creating 1/1
+ ✔ Container cloudsim  Running                                                                                          0.0s 
+[tracker] WandB disabled — logging to console only
+[environment] Connected to Py4J gateway cloudsim-java:25333 (attempt 1)
+
+[baseline_eval] Running baseline: k8s (scenario=LOW, seed=42)
+[baseline_eval] k8s: 1813 steps, energy=23864.4538 kWh, r_energy=-4990268.75, r_sla=0.00
+[baseline_eval] Metrics exported → /data/results/baseline-LOW/k8s/
+[tracker] Episode 0 (k8s): len=?, energy_kwh=23864.4538, r_energy=-4990268.75, r_sla=0.00
+
+[baseline_eval] Running baseline: random (scenario=LOW, seed=42)
+[baseline_eval] random: 1813 steps, energy=24336.8031 kWh, r_energy=-4985277.50, r_sla=0.00
+[baseline_eval] Metrics exported → /data/results/baseline-LOW/random/
+[tracker] Episode 0 (random): len=?, energy_kwh=24336.8031, r_energy=-4985277.50, r_sla=0.00
+[tracker] === Scheduler Comparison ===
+  k8s: energy_kwh=23864.45382829861, total_energy_reward=-4990268.75, total_sla_reward=0.0, steps=1813
+  random: energy_kwh=24336.80314722222, total_energy_reward=-4985277.5, total_sla_reward=0.0, steps=1813
+[baseline_eval] Results saved to /data/results/baseline-LOW/baseline_results.json
+
+────────────────────────────────────────────────────────────
+[collect] Step 2 — Baseline: HIGH
+  $ docker compose run --rm rl-agent python src/baseline_eval.py --scenario HIGH --seed 42 --output /data/results
+────────────────────────────────────────────────────────────
+[+] Creating 1/1
+ ✔ Container cloudsim  Running                                                                                          0.0s 
+[tracker] WandB disabled — logging to console only
+[environment] Connected to Py4J gateway cloudsim-java:25333 (attempt 1)
+
+[baseline_eval] Running baseline: k8s (scenario=HIGH, seed=42)
+[baseline_eval] k8s: 7255 steps, energy=40689.3319 kWh, r_energy=-20227868.75, r_sla=0.00
+[baseline_eval] Metrics exported → /data/results/baseline-HIGH/k8s/
+[tracker] Episode 0 (k8s): len=?, energy_kwh=40689.3319, r_energy=-20227868.75, r_sla=0.00
+
+[baseline_eval] Running baseline: random (scenario=HIGH, seed=42)
+[baseline_eval] random: 7255 steps, energy=41323.5865 kWh, r_energy=-20222877.50, r_sla=0.00
+[baseline_eval] Metrics exported → /data/results/baseline-HIGH/random/
+[tracker] Episode 0 (random): len=?, energy_kwh=41323.5865, r_energy=-20222877.50, r_sla=0.00
+[tracker] === Scheduler Comparison ===
+  k8s: energy_kwh=40689.33188298611, total_energy_reward=-20227868.75, total_sla_reward=0.0, steps=7255
+  random: energy_kwh=41323.586480555554, total_energy_reward=-20222877.5, total_sla_reward=0.0, steps=7255
+[baseline_eval] Results saved to /data/results/baseline-HIGH/baseline_results.json
+
+────────────────────────────────────────────────────────────
+[collect] Step 2 — Baseline: BURST
+  $ docker compose run --rm rl-agent python src/baseline_eval.py --scenario BURST --seed 42 --output /data/results
+────────────────────────────────────────────────────────────
+[+] Creating 1/1
+ ✔ Container cloudsim  Running                                                                                          0.0s 
+[tracker] WandB disabled — logging to console only
+[environment] Connected to Py4J gateway cloudsim-java:25333 (attempt 1)
+
+[baseline_eval] Running baseline: k8s (scenario=BURST, seed=42)
+[baseline_eval] k8s: 3569 steps, energy=31784.1706 kWh, r_energy=-9908858.75, r_sla=0.00
+[baseline_eval] Metrics exported → /data/results/baseline-BURST/k8s/
+[tracker] Episode 0 (k8s): len=?, energy_kwh=31784.1706, r_energy=-9908858.75, r_sla=0.00
+
+[baseline_eval] Running baseline: random (scenario=BURST, seed=42)
+[baseline_eval] random: 3569 steps, energy=32107.2555 kWh, r_energy=-9895403.75, r_sla=0.00
+[baseline_eval] Metrics exported → /data/results/baseline-BURST/random/
+[tracker] Episode 0 (random): len=?, energy_kwh=32107.2555, r_energy=-9895403.75, r_sla=0.00
+[tracker] === Scheduler Comparison ===
+  k8s: energy_kwh=31784.170609895835, total_energy_reward=-9908858.75, total_sla_reward=0.0, steps=3569
+  random: energy_kwh=32107.255505381945, total_energy_reward=-9895403.75, total_sla_reward=0.0, steps=3569
+[baseline_eval] Results saved to /data/results/baseline-BURST/baseline_results.json
+
+[collect] Step 3 — Analyzing trace: openb_pod_list_default.csv
+[collect] Trace: 7,255 tasks after Pending filter
+
+[collect] Step 4 — Generating figures...
+[collect] Saved baseline-energy.pdf
+[collect] Saved baseline-sla.pdf
+[collect] Saved baseline-energy-time.pdf
+[collect] Saved trace-numgpu-hist.pdf
+[collect] Saved trace-qos-pie.pdf
+
+======================================================================
+  \TODOnum REPLACEMENTS — copy into 05-ket-qua.tex
+======================================================================
+
+── TABLE 5.5 (tab:trace-stats) ─────────────────────────────────
+  cpu_milli     : min=1000.0  p25=4000.0  median=11300.0  mean=10534.0  p75=12000.0  max=120200.0
+  memory_mib    : min=0.0  p25=15258.0  median=41560.0  mean=36898.2  p75=49152.0  max=737280.0
+  num_gpu       : min=0.0  p25=1.0  median=1.0  mean=0.9  p75=1.0  max=8.0
+  duration      : min=4.0  p25=175.0  median=616.0  mean=28949.5  p75=2241.0  max=12537496.0
+  Total tasks (non-Pending): 7,255
+
+── QoS distribution (Fig 5.8) ───────────────────────────────────
+  LS: 57.8%
+  BE: 40.8%
+  Burstable: 1.4%
+  Guaranteed: 0.1%
+
+── GPU demand (Fig 5.7) ─────────────────────────────────────────
+  num_gpu=0: 14.5%
+  num_gpu=1: 84.5%
+  num_gpu=2: 0.2%
+  num_gpu=4: 0.2%
+  num_gpu=8: 0.6%
+
+── TABLE 5.3 (tab:baseline-results) ────────────────────────────
+  Scenario Policy   Energy kWh    SLA viol   Viol%    CPU util
+  ------------------------------------------------------------
+  LOW     k8s      23864.4538    0          0.00     11.7932
+  LOW     random   24336.8031    0          0.00     11.7646
+  HIGH    k8s      40689.3319    0          0.00     56.1507
+  HIGH    random   41323.5865    0          0.00     56.1436
+  BURST   k8s      31784.1706    0          0.00     26.6672
+  BURST   random   32107.2555    0          0.00     26.6585
+
+── Ratios for §5.3 narrative ────────────────────────────────────
+  LOW: K8s uses 1.9% less energy; SLA ratio Random/K8s = 0.00×
+  HIGH: K8s uses 1.5% less energy; SLA ratio Random/K8s = 0.00×
+  BURST: K8s uses 1.0% less energy; SLA ratio Random/K8s = 0.00×
+
+── TABLE tab:scenario-stats (lines 355-357) ─────────────────────
+  Scenario #Tasks   Energy(kWh)  SimTime(s)  
+  LOW      1813     23864.4538   10717746.0  
+  HIGH     7255     40689.3319   12901761.0  
+  BURST    3569     31784.1706   12876895.0  
+
+── TABLE 5.2 (tab:smoke-results) ───────────────────────────────
+  total_energy_kwh: 23362.573921
+  cpu_energy_kwh: 5614.768446
+  gpu_energy_kwh: 17747.805475
+  total_tasks: 1813
+  sla_violations: 0
+  sla_violation_rate: 0.0
+  avg_cpu_utilization: 11.7633
+  avg_gpu_utilization: 0.7484
+  makespan_sec: 10717746.0
+
+======================================================================
+
+[collect] Done. Next steps:
+  1. Copy the numbers above into \TODOnum{...} in 05-ket-qua.tex
+  2. Take screenshots: docker compose ps, smoke test terminal
+  3. Run pdflatex to rebuild the PDF

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -c \"^\\\\\\\\\\\\\\\\section\\\\|^\\\\\\\\\\\\\\\\subsection\" \"d:/HCMUT-uni/252/DACn/ELDAS/assets/report/chapters/02-co-so-ly-thuyet.tex\")"
+    ]
+  }
+}

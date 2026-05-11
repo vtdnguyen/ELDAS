@@ -1,0 +1,24 @@
+{
+  "k8s": {
+    "scheduler": "k8s",
+    "scenario": "LOW",
+    "seed": 42,
+    "steps": 1813,
+    "total_energy_reward": -4990268.75,
+    "total_sla_reward": 0.0,
+    "mean_energy_reward": -2752.492415885273,
+    "mean_sla_reward": 0.0,
+    "total_energy_kwh": 23864.45382829861
+  },
+  "random": {
+    "scheduler": "random",
+    "scenario": "LOW",
+    "seed": 42,
+    "steps": 1813,
+    "total_energy_reward": -4985277.5,
+    "total_sla_reward": 0.0,
+    "mean_energy_reward": -2749.7393822393824,
+    "mean_sla_reward": 0.0,
+    "total_energy_kwh": 24336.80314722222
+  }
+}
