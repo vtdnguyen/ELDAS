@@ -22,6 +22,21 @@ services:
       # Defaults below let the stack run unchanged when .env doesn't set them.
       - MONITORING_ENABLED=${MONITORING_ENABLED:-false}
       - METRICS_PORT=${METRICS_PORT:-9091}
+      # T7.1 — Topology override (default-on-miss inside Java).
+      - NUM_HOSTS=${NUM_HOSTS:-10}
+      - VCPU_PER_HOST=${VCPU_PER_HOST:-64}
+      - GPU_PER_HOST=${GPU_PER_HOST:-8}
+      - RAM_PER_HOST_GB=${RAM_PER_HOST_GB:-256}
+      - MIPS_PER_PE=${MIPS_PER_PE:-10000}
+      - CPU_MAX_WATT=${CPU_MAX_WATT:-400}
+      - CPU_IDLE_WATT=${CPU_IDLE_WATT:-120}
+      - GPU_MAX_WATT=${GPU_MAX_WATT:-300}
+      - GPU_IDLE_WATT=${GPU_IDLE_WATT:-30}
+      # T8.1 — Host state-machine knobs.
+      - IDLE_THRESHOLD_SEC=${IDLE_THRESHOLD_SEC:-30}
+      - P_SUSPENDED_W=${P_SUSPENDED_W:-10}
+      - WAKE_ENERGY_KWH=${WAKE_ENERGY_KWH:-0.0005}
+      - WAKE_LATENCY_SEC=${WAKE_LATENCY_SEC:-5}
     networks:
       - sim-net
     # Healthcheck: thử kết nối port Py4J mỗi 10 giây
