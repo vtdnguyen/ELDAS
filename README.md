@@ -26,10 +26,11 @@ Không tồn tại một giải pháp duy nhất tối ưu cả hai — thay và
 │  │  (Java 21)          │ :25333 │  (Python 3.11)          │            │
 │  │                     │        │                         │            │
 │  │  • Mô phỏng DC      │        │  • Agent MORL (PPO)     │            │
-│  │  • Energy model     │        │  • Vector reward        │            │
-│  │  • Alibaba Trace    │        │  • Action masking       │            │
-│  │  • K8s + Random     │        │  • WandB tracking       │            │
-│  │    baselines        │        │                         │            │
+│  │  • Energy model +   │        │  • Vector reward        │            │
+│  │    idle/suspend FSM │        │  • Action masking       │            │
+│  │  • Alibaba Trace    │        │  • WandB tracking       │            │
+│  │  • 5 baselines (FF/ │        │  • PPO-min checkpoint   │            │
+│  │    BF/RR/K8s/Random)│        │                         │            │
 │  └──────────┬──────────┘        └────────────┬────────────┘            │
 │             │ :9091 (opt)                    │ :8000 (opt, Phase 2)    │
 │             ▼                                ▼                         │
@@ -47,11 +48,11 @@ Hệ thống gồm **4 lớp core** + **1 lớp Observability tùy chọn**:
 
 **Lớp 1 — Docker Compose:** Điều phối 2 container core trên cùng network `sim-net`, chia sẻ dữ liệu qua 3 volume (`trace-data` read-only, `results` ghi chung, `model-store` cho RL artifacts).
 
-**Lớp 2 — CloudSim Plus (Java):** Engine mô phỏng discrete-event. Tạo datacenter ảo gồm các Host với mô hình năng lượng `P(U) = P_idle + U × (P_max − P_idle)`. Đọc workload thực từ Alibaba GPU Cluster Trace v2023 và chuyển thành các tác vụ mô phỏng. `SimulationManager` quản lý vòng đời (reset/step/done) thông qua 2 `SynchronousQueue` đồng bộ sim-thread ↔ gateway-thread.
+**Lớp 2 — CloudSim Plus (Java):** Engine mô phỏng discrete-event. Tạo datacenter ảo gồm các Host với mô hình năng lượng `P(U) = P_idle + U × (P_max − P_idle)` cùng **state machine** `ACTIVE → IDLE → SUSPENDED` (host nhàn rỗi quá `IDLE_THRESHOLD_SEC` sẽ tắt, wake-up tốn `WAKE_ENERGY_KWH` + `WAKE_LATENCY_SEC`) — tạo gradient năng lượng có ý nghĩa cho RL. Đọc workload thực từ Alibaba GPU Cluster Trace v2023. `SimulationManager` quản lý vòng đời (reset/step/done) thông qua 2 `SynchronousQueue` đồng bộ sim-thread ↔ gateway-thread.
 
 **Lớp 3 — Py4J Gateway:** Cầu nối RPC in-memory giữa JVM và Python. `GatewayEntryPoint` expose `reset(scenario, seed)`, `step(hostIndex)`, `getActionMask()`, `selectBaselineAction(policy)`. Agent Python gọi trực tiếp object Java mà không cần serialize qua REST — cho phép vòng lặp RL tốc độ cao.
 
-**Lớp 4 — MO-Gymnasium (Python):** `CloudSimEnv` wrap Java side thành môi trường Gymnasium chuẩn. Mỗi bước: nhận trạng thái datacenter `(3H+4)` chiều → chọn host (đã masked) → nhận vector phần thưởng `[R_energy, R_SLA]` → cập nhật policy. `ScalarRewardWrapper` cộng linear scalarization cho MaskablePPO.
+**Lớp 4 — MO-Gymnasium (Python):** `CloudSimEnv` wrap Java side thành môi trường Gymnasium chuẩn. Mỗi bước: nhận trạng thái datacenter `(6H+4)` chiều (CPU/MEM/GPU util + state one-hot ACTIVE/IDLE/SUSPENDED + 4 task features) → chọn host (đã masked) → nhận vector phần thưởng `[R_energy, R_SLA]` → cập nhật policy. `ScalarRewardWrapper` cộng linear scalarization cho MaskablePPO; reward normalization (Welford) là **bắt buộc** để tránh value-loss explode.
 
 **Lớp 5 — Observability (opt-in, Phase 1.5):** Prometheus scrape `cloudsim-java:9091` (Java exporter) mỗi 2s, Grafana :3000 hiển thị dashboard live (heatmap host utilization, total energy, SLA violations, queue length). Tách hoàn toàn khỏi đường tới hạn — bật bằng `docker compose --profile monitoring up`. **Không thay thế** `metrics.csv` + WandB cho figures báo cáo khoa học (vì Prometheus theo wall-time, không phải sim-time).
 
@@ -97,18 +98,23 @@ Dữ liệu được phân lớp thành 3 kịch bản:
 
 ## So sánh & Đánh giá
 
-Kết quả agent MORL được đối chiếu với 2 baseline:
+Kết quả agent MORL được đối chiếu với **5 baseline cổ điển** (xếp từ "spread nhất" sang "pack nhất"):
 
 | Scheduler | Mô tả |
 |-----------|-------|
-| **K8s Default** | Mô phỏng Kubernetes scheduler: Filter (loại host không đủ tài nguyên) + LeastRequestedPriority |
-| **Random** | Chọn host ngẫu nhiên trong số các host hợp lệ |
+| **Round-Robin** | Pointer xoay vòng modulo `NUM_HOSTS`, công bằng tuyệt đối |
+| **Random** | Chọn host ngẫu nhiên trong số các host hợp lệ (control) |
+| **K8s Default** | Mô phỏng Kubernetes: Filter + LeastRequestedPriority (spread theo điểm tài nguyên trống) |
+| **First-Fit** | Duyệt theo index, lấy host đầu tiên đủ tài nguyên |
+| **Best-Fit** | Score = max(cpu/ram/gpu after-ratio), chọn host CAO nhất vẫn fit → pack chặt nhất |
+
+**Kết quả Phase 1.8 (HIGH, seed=42):** Pareto front đã tách thành 3 cụm rõ rệt — `{BestFit, FirstFit}` pack-tight (~21.8k kWh, SLA tệ); `{Random}` middle; `{K8s, RoundRobin}` spread (~27.3k kWh, SLA tốt nhất). **PPO-min** (100k steps, weights 0.5/0.5) đạt vị trí interior Pareto và **dominate Random** trên cả hai trục. Energy spread BestFit↔RoundRobin: **20–26%** tuỳ scenario.
 
 Tiêu chí đánh giá:
-- Tổng năng lượng tiêu thụ (Joules/kWh)
-- Thời gian hoàn thành (Makespan)
-- Tỷ lệ vi phạm SLA (Deadline adherence)
-- Trực quan hóa Pareto Front
+- Tổng năng lượng tiêu thụ (kWh, có cộng `wake_energy_kwh`)
+- Số lần wake-up host (`total_wakeups`)
+- Tỷ lệ vi phạm SLA + R_sla cộng dồn
+- Trực quan hóa Pareto Front (Phase 2 weight sweep)
 
 ## Tech Stack
 
@@ -132,8 +138,11 @@ docker compose up --build
 # Smoke test (T4.5) — verify full RL loop qua Py4J
 docker compose run --rm rl-agent python src/smoke_test.py
 
-# Baseline evaluation — K8s vs Random
+# Baseline evaluation — 5 schedulers (roundrobin, random, k8s, firstfit, bestfit)
 docker compose run --rm rl-agent python src/baseline_eval.py --scenario HIGH
+
+# Minimum PPO training (100k steps, w=0.5/0.5, ~40 phút CPU)
+docker compose run --rm rl-agent python src/train_min.py --scenario HIGH
 
 # Bật monitoring stack (Prometheus :9090 + Grafana :3000)
 docker compose --profile monitoring up --build
@@ -160,7 +169,7 @@ ELDAS/
 │   └── grafana/provisioning/
 ├── data/
 │   ├── alibaba-trace/          # Dữ liệu workload thực
-│   └── results/                # baseline-{LOW,HIGH,BURST}/{k8s,random}/{metrics.csv,summary.json}
+│   └── results/                # baseline-{LOW,HIGH,BURST}/{roundrobin,random,k8s,firstfit,bestfit,ppo-min}/{metrics.csv,summary.json}
 ├── scripts/                    # download-trace.sh, check-monitoring.sh
 └── assets/
     ├── docs/RUN_GUIDE.md       # Hướng dẫn build/chạy/test chi tiết
