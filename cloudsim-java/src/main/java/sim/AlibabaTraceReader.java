@@ -127,9 +127,14 @@ public final class AlibabaTraceReader {
             double deletion   = parseDoubleSafe(cols[COL_DELETION_TIME],  0);
             double scheduled  = parseDoubleSafe(cols[COL_SCHEDULED_TIME], 0);
 
-            // Derive deadline: the task should complete by its historical deletion time.
-            // This includes original scheduling delay — the RL agent gets that slack.
-            double deadline  = deletion;
+            // Derive deadline as a QoS-dependent slack budget over the
+            // task's nominal duration. Using `deletion` directly is wrong:
+            // it equals the natural completion time, so any scheduler
+            // achieves slack = 0 by definition (see java-validation-report
+            // §B4). Tying the deadline to slackFactor(qos) lets stricter
+            // classes (LS) act as the contention signal for the RL agent.
+            double rawDuration = Math.max(0, deletion - Math.max(creation, scheduled));
+            double deadline    = creation + rawDuration * SimulationConfig.qosToSlackFactor(qos);
 
             double slaLambda = SimulationConfig.qosToLambda(qos);
 

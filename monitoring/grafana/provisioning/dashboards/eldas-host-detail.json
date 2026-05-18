@@ -1,0 +1,244 @@
+{
+  "annotations": {"list": []},
+  "description": "Per-host drill-down. Pick host, scenario, scheduler — see CPU/MEM/GPU/power for that single host, compared against cluster mean. Parameterised: one dashboard file, all 10 hosts.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "Back to overview",
+      "type": "dashboards",
+      "tags": ["eldas", "live"],
+      "asDropdown": false,
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ],
+  "liveNow": true,
+  "panels": [
+    {
+      "id": 100, "type": "row",
+      "title": "Host $host — current values ($scenario / $scheduler)",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "collapsed": false, "panels": []
+    },
+    {
+      "id": 1, "type": "stat",
+      "title": "CPU util",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A",
+        "expr": "eldas_host_cpu_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "decimals": 2,
+        "thresholds": {"mode": "absolute", "steps": [
+          {"color": "blue", "value": null},
+          {"color": "green", "value": 0.3},
+          {"color": "orange", "value": 0.7},
+          {"color": "red", "value": 0.95}]}}},
+      "options": {"colorMode": "background", "graphMode": "area", "textMode": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2, "type": "stat",
+      "title": "MEM util",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A",
+        "expr": "eldas_host_mem_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "decimals": 2,
+        "thresholds": {"mode": "absolute", "steps": [
+          {"color": "blue", "value": null},
+          {"color": "green", "value": 0.3},
+          {"color": "orange", "value": 0.7},
+          {"color": "red", "value": 0.95}]}}},
+      "options": {"colorMode": "background", "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 3, "type": "stat",
+      "title": "GPU util",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A",
+        "expr": "eldas_host_gpu_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "decimals": 2,
+        "thresholds": {"mode": "absolute", "steps": [
+          {"color": "blue", "value": null},
+          {"color": "green", "value": 0.25},
+          {"color": "orange", "value": 0.625},
+          {"color": "red", "value": 0.95}]}}},
+      "options": {"colorMode": "background", "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 4, "type": "stat",
+      "title": "Power draw (W)",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A",
+        "expr": "eldas_host_power_watt{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}"}],
+      "fieldConfig": {"defaults": {"unit": "watt", "decimals": 0,
+        "thresholds": {"mode": "absolute", "steps": [
+          {"color": "blue", "value": null},
+          {"color": "green", "value": 200},
+          {"color": "orange", "value": 1500},
+          {"color": "red", "value": 2500}]}}},
+      "options": {"colorMode": "background", "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+
+    {
+      "id": 200, "type": "row",
+      "title": "Resource utilisation over time",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+      "collapsed": false, "panels": []
+    },
+    {
+      "id": 10, "type": "timeseries",
+      "title": "Host $host — CPU vs MEM vs GPU",
+      "description": "Three resource axes on one chart. Watch for which resource becomes the bottleneck first.",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "eldas_host_cpu_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}",
+          "legendFormat": "CPU"},
+        {"refId": "B", "expr": "eldas_host_mem_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}",
+          "legendFormat": "MEM"},
+        {"refId": "C", "expr": "eldas_host_gpu_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}",
+          "legendFormat": "GPU"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1,
+        "color": {"mode": "palette-classic"},
+        "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never"}}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}}
+    },
+    {
+      "id": 11, "type": "timeseries",
+      "title": "Host $host — power draw vs cluster mean",
+      "description": "If this line stays well above the cluster mean, the scheduler is packing tasks here. Well below = host is being avoided.",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "eldas_host_power_watt{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}",
+          "legendFormat": "host $host"},
+        {"refId": "B", "expr": "avg(eldas_host_power_watt{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
+          "legendFormat": "cluster mean"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "watt",
+        "color": {"mode": "palette-classic"},
+        "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never"}},
+        "overrides": [{"matcher": {"id": "byName", "options": "cluster mean"},
+          "properties": [{"id": "custom.lineStyle", "value": {"fill": "dash"}},
+                         {"id": "color", "value": {"mode": "fixed", "fixedColor": "gray"}}]}]},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}}
+    },
+
+    {
+      "id": 300, "type": "row",
+      "title": "Host vs cluster context",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 15},
+      "collapsed": false, "panels": []
+    },
+    {
+      "id": 20, "type": "timeseries",
+      "title": "CPU deviation from cluster mean",
+      "description": "(this host CPU) − (cluster mean CPU). Positive = host is hotter than peers; negative = cooler.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A",
+        "expr": "eldas_host_cpu_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"} - on() group_left() avg(eldas_host_cpu_util{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
+        "legendFormat": "host $host − mean"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit",
+        "color": {"mode": "palette-classic"},
+        "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 30,
+          "gradientMode": "scheme", "showPoints": "never",
+          "axisCenteredZero": true}}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": false},
+        "tooltip": {"mode": "single"}}
+    },
+    {
+      "id": 21, "type": "timeseries",
+      "title": "GPU deviation from cluster mean",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A",
+        "expr": "eldas_host_gpu_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"} - on() group_left() avg(eldas_host_gpu_util{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
+        "legendFormat": "host $host − mean"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit",
+        "color": {"mode": "palette-classic"},
+        "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 30,
+          "gradientMode": "scheme", "showPoints": "never",
+          "axisCenteredZero": true}}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": false},
+        "tooltip": {"mode": "single"}}
+    },
+
+    {
+      "id": 400, "type": "row",
+      "title": "All hosts (gentle background reference)",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 24},
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 30, "type": "timeseries",
+          "title": "All hosts CPU — selected host highlighted",
+          "description": "Other hosts shown faded; the currently selected $host highlighted. Helps see whether the chosen host is an outlier.",
+          "gridPos": {"h": 9, "w": 24, "x": 0, "y": 25},
+          "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+          "targets": [{"refId": "A",
+            "expr": "max by (host_id) (eldas_host_cpu_util{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
+            "legendFormat": "host {{host_id}}"}],
+          "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1,
+            "color": {"mode": "palette-classic"},
+            "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 0, "showPoints": "never"}},
+            "overrides": [{"matcher": {"id": "byFrameRefID", "options": "A"},
+              "properties": []}]},
+          "options": {"legend": {"displayMode": "list", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}}
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["eldas", "host"],
+  "templating": {
+    "list": [
+      {
+        "name": "scenario", "label": "Scenario", "type": "query",
+        "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+        "query": {"query": "label_values(eldas_host_cpu_util, scenario)", "refId": "Scenario"},
+        "current": {"text": "HIGH", "value": "HIGH", "selected": false},
+        "includeAll": false, "multi": false,
+        "refresh": 1, "sort": 1
+      },
+      {
+        "name": "scheduler", "label": "Scheduler", "type": "query",
+        "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+        "query": {"query": "label_values(eldas_host_cpu_util{scenario=\"$scenario\"}, scheduler)", "refId": "Scheduler"},
+        "current": {"text": "k8s", "value": "k8s", "selected": false},
+        "includeAll": false, "multi": false,
+        "refresh": 1, "sort": 1
+      },
+      {
+        "name": "host", "label": "Host", "type": "query",
+        "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+        "query": {"query": "label_values(eldas_host_cpu_util{scenario=\"$scenario\", scheduler=\"$scheduler\"}, host_id)", "refId": "Host"},
+        "current": {"text": "0", "value": "0", "selected": false},
+        "includeAll": false, "multi": false,
+        "refresh": 1, "sort": 3
+      }
+    ]
+  },
+  "time": {"from": "now-30m", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "ELDAS Live — Host detail",
+  "uid": "eldas-host-detail",
+  "version": 1,
+  "weekStart": ""
+}

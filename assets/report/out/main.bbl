@@ -1194,6 +1194,52 @@
       \verb 10.23919/INM.2017.7987304
       \endverb
     \endentry
+    \entry{cloudsimplus2024perf}{misc}{}{}
+      \name{author}{1}{}{%
+        {{hash=6e08c51ce69fd91df8537319c8f6a68a}{%
+           family={{CloudSim Plus Team}},
+           familyi={C\bibinitperiod}}}%
+      }
+      \strng{namehash}{6e08c51ce69fd91df8537319c8f6a68a}
+      \strng{fullhash}{6e08c51ce69fd91df8537319c8f6a68a}
+      \strng{fullhashraw}{6e08c51ce69fd91df8537319c8f6a68a}
+      \strng{bibnamehash}{6e08c51ce69fd91df8537319c8f6a68a}
+      \strng{authorbibnamehash}{6e08c51ce69fd91df8537319c8f6a68a}
+      \strng{authornamehash}{6e08c51ce69fd91df8537319c8f6a68a}
+      \strng{authorfullhash}{6e08c51ce69fd91df8537319c8f6a68a}
+      \strng{authorfullhashraw}{6e08c51ce69fd91df8537319c8f6a68a}
+      \field{sortinit}{3}
+      \field{sortinithash}{ad6fe7482ffbd7b9f99c9e8b5dccd3d7}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{howpublished}{\url{https://cloudsimplus.org/docs/performance.html}}
+      \field{note}{Accessed: 2026-05}
+      \field{title}{Performance Results --- {CloudSim Plus} vs. {CloudSim} 4.0.0}
+      \field{year}{2024}
+    \endentry
+    \entry{google2023datacenter}{misc}{}{}
+      \name{author}{1}{}{%
+        {{hash=8b36e9207c24c76e6719268e49201d94}{%
+           family={{Google}},
+           familyi={G\bibinitperiod}}}%
+      }
+      \strng{namehash}{8b36e9207c24c76e6719268e49201d94}
+      \strng{fullhash}{8b36e9207c24c76e6719268e49201d94}
+      \strng{fullhashraw}{8b36e9207c24c76e6719268e49201d94}
+      \strng{bibnamehash}{8b36e9207c24c76e6719268e49201d94}
+      \strng{authorbibnamehash}{8b36e9207c24c76e6719268e49201d94}
+      \strng{authornamehash}{8b36e9207c24c76e6719268e49201d94}
+      \strng{authorfullhash}{8b36e9207c24c76e6719268e49201d94}
+      \strng{authorfullhashraw}{8b36e9207c24c76e6719268e49201d94}
+      \field{sortinit}{3}
+      \field{sortinithash}{ad6fe7482ffbd7b9f99c9e8b5dccd3d7}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{howpublished}{\url{https://www.google.com/about/datacenters/efficiency/}}
+      \field{note}{Accessed: 2026-05}
+      \field{title}{Efficiency --- {Google Data Centers}}
+      \field{year}{2023}
+    \endentry
     \entry{py4j2024}{misc}{}{}
       \name{author}{1}{}{%
         {{hash=64742993754d3d3f114ad02e75e5e10b}{%

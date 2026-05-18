@@ -96,7 +96,10 @@ def evaluate_baseline(
 
 # ── Run all baselines ─────────────────────────────────────────────────────
 
-BASELINE_POLICIES = ["k8s", "random"]
+# T8.7 — Phase 1.8 ships 5 classical baselines. Ordering chosen so the
+# log reads top-down from "most spread" to "most packed", making the
+# expected energy ordering visible at a glance.
+BASELINE_POLICIES = ["roundrobin", "random", "k8s", "firstfit", "bestfit"]
 
 
 def run_all_baselines(

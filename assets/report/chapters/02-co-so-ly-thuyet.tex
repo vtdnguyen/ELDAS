@@ -6,95 +6,102 @@
 \chapter{Cơ sở lý thuyết và nghiên cứu liên quan}
 \label{chap:co-so-ly-thuyet}
 
-Chương này trình bày nền tảng lý thuyết cho đề tài ELDAS theo bốn mảng chính:
-(i)~các thuật toán lập lịch trong trung tâm dữ liệu; (ii)~mô hình tiêu thụ
-năng lượng; (iii)~học tăng cường đa mục tiêu (MORL); và (iv)~các công trình
-nghiên cứu liên quan. Mục tiêu là cung cấp đủ kiến thức để người đọc theo dõi
-được các quyết định thiết kế ở Chương~\ref{chap:gioi-thieu} cũng như phần
-hiện thực ở các chương sau, đồng thời định vị đóng góp của đề tài so với các
-nghiên cứu đã có.
+Chương này tập hợp nền tảng lý thuyết cho ELDAS theo bốn mảng: (i)~các thuật
+toán lập lịch trong trung tâm dữ liệu; (ii)~mô hình tiêu thụ năng lượng;
+(iii)~học tăng cường đa mục tiêu (MORL); và (iv)~các công trình nghiên cứu
+liên quan. Phần trình bày được tiết chế ở mức vừa đủ để người đọc nắm được
+các quyết định thiết kế ở Chương~\ref{chap:gioi-thieu} cũng như phần hiện
+thực ở các chương sau, đồng thời định vị được đóng góp của đề tài trong
+tương quan với các nghiên cứu đã có.
 
 % ============================================================
 \section{Lập lịch trong trung tâm dữ liệu}
 \label{sec:lap-lich-dc}
 
 \subsection{Các thuật toán heuristic truyền thống}
-Lập lịch tài nguyên được nghiên cứu từ rất sớm dưới dạng bài toán
-\textit{Bin Packing}: cần đặt $n$ vật phẩm có kích thước cho trước vào số
-lượng tối thiểu các thùng có dung lượng cố định~\cite{garey1979computers}.
-Các \textit{heuristic} kinh điển vẫn được sử dụng rộng rãi gồm:
+Bài toán lập lịch tài nguyên đã được nghiên cứu từ rất sớm, dưới dạng
+\textit{Bin Packing}: xếp $n$ vật phẩm có kích thước cho trước vào số thùng
+nhỏ nhất, mỗi thùng có dung lượng cố định~\cite{garey1979computers}. Một số
+\textit{heuristic} kinh điển vẫn được sử dụng phổ biến cho đến nay:
 
 \begin{itemize}
-  \item \textbf{First-Fit (FF).} Duyệt danh sách host theo thứ tự cố định và
-        đặt tác vụ lên host đầu tiên đủ tài nguyên. Đơn giản, độ phức tạp
-        $O(n \cdot m)$, nhưng dễ gây phân mảnh.
+  \item \textbf{First-Fit (FF).} Duyệt danh sách host theo thứ tự cố định,
+        đặt tác vụ lên host đầu tiên còn đủ tài nguyên. Cách làm đơn giản,
+        độ phức tạp $O(n \cdot m)$, nhưng dễ gây phân mảnh.
   \item \textbf{Best-Fit (BF).} Đặt tác vụ lên host \textit{vừa khít nhất}
-        (host có tài nguyên dư còn lại nhỏ nhất sau khi đặt). Giảm phân mảnh
-        nhưng tốn chi phí sắp xếp.
-  \item \textbf{Worst-Fit (WF).} Ngược lại BF -- chọn host dư nhiều nhất, nhằm
-        cân bằng tải nhưng làm tăng số host bật.
-  \item \textbf{Round-Robin (RR).} Phân phối tuần tự, đảm bảo công bằng nhưng
-        bỏ qua sự khác biệt về dung lượng host.
+        --- tức host có tài nguyên dư còn lại nhỏ nhất sau khi đặt. Giảm
+        phân mảnh nhưng tốn chi phí sắp xếp.
+  \item \textbf{Worst-Fit (WF).} Ngược lại với BF: chọn host còn dư nhiều
+        nhất để cân bằng tải, đổi lại làm tăng số host phải bật.
+  \item \textbf{Round-Robin (RR).} Phân phối tuần tự, bảo đảm công bằng
+        nhưng bỏ qua sự khác biệt về dung lượng giữa các host.
 \end{itemize}
 
-Các heuristic trên đều \textbf{đơn mục tiêu} (single-objective): tối thiểu số
-host hoặc cân bằng tải, không xét đến năng lượng hay SLA. Đây là hạn chế lớn
-khi áp dụng cho datacenter AI hiện đại.
+Điểm chung của các heuristic này là \textbf{đơn mục tiêu}
+(single-objective): hoặc tối thiểu số host, hoặc cân bằng tải, không tính
+đến năng lượng hay SLA. Đây là hạn chế đáng kể khi áp dụng cho các
+datacenter AI hiện đại.
 
 \subsection{Meta-heuristic: Ant Colony Optimization (ACO)}
 \label{ssec:aco}
 
-Để vượt qua giới hạn ``đơn mục tiêu'' và ``mắc kẹt ở cực tiểu địa
-phương'' của các heuristic ``một bước nhìn'' (FF, BF), nhiều nghiên cứu
-chuyển sang \textbf{meta-heuristic}, trong đó \textit{Ant Colony
-Optimization} (ACO) là đại diện được khảo sát rộng rãi nhất cho bài
-toán lập lịch tài nguyên~\cite{dorigo1996ant}.
+Để vượt qua hai giới hạn cố hữu của các heuristic ``nhìn một bước''
+(FF, BF) là \emph{đơn mục tiêu} và \emph{dễ kẹt ở cực tiểu địa
+phương}, nhiều nghiên cứu chuyển sang nhóm \textbf{meta-heuristic};
+trong đó \textit{Ant Colony Optimization} (ACO) là đại diện được khảo
+sát rộng rãi nhất cho bài toán lập lịch tài
+nguyên~\cite{dorigo1996ant}.
 
 \paragraph{Ý tưởng cốt lõi.} ACO mô phỏng cách đàn kiến tìm đường ngắn
-nhất tới nguồn thức ăn qua \emph{pheromone trail}: kiến đi qua một đoạn
-đường để lại pheromone, đoạn nào có nhiều pheromone hơn lại được kiến
-sau ưu tiên chọn, tạo vòng phản hồi dương dần hội tụ về đường tối ưu.
-Khi áp dụng cho scheduling, mỗi ``con kiến'' xây một schedule hoàn
-chỉnh bằng cách chọn host cho từng task theo xác suất tỉ lệ thuận với
-lượng pheromone tích luỹ và chất lượng ước tính của cặp \textit{(task, host)}.
-Sau mỗi vòng, pheromone bay hơi một phần và được củng cố theo mức độ
-tốt của schedule vừa tìm được, tạo ``bộ nhớ tập thể'' hướng dẫn các
-kiến ở vòng sau. Liu và cộng sự áp dụng biến thể
-\textit{Energy-aware ACO} cho VM placement và đạt giảm $9$--$12\%$
-năng lượng so với First-Fit Decreasing trên cùng workload
-trace~\cite{liu2014adaptive}.
+nhất tới nguồn thức ăn dựa trên \emph{pheromone trail}: mỗi con kiến đi
+qua một đoạn đường sẽ để lại một lượng pheromone; đoạn nào tích luỹ
+nhiều pheromone hơn sẽ được các con kiến sau ưu tiên chọn, tạo thành
+vòng phản hồi dương và dần hội tụ về đường tối ưu. Khi ánh xạ sang bài
+toán scheduling, mỗi ``con kiến'' xây một schedule hoàn chỉnh bằng
+cách chọn host cho từng task theo xác suất tỉ lệ thuận với lượng
+pheromone đã tích luỹ và chất lượng ước tính của cặp
+\textit{(task, host)}. Sau mỗi vòng, pheromone bay hơi một phần rồi
+được củng cố theo mức độ tốt của schedule vừa tìm ra, hình thành ``bộ
+nhớ tập thể'' để định hướng cho các kiến ở vòng sau. Liu và cộng sự áp
+dụng biến thể \textit{Energy-aware ACO} cho bài toán VM placement và
+giảm được $9$--$12\%$ năng lượng so với First-Fit Decreasing trên cùng
+một bộ workload trace~\cite{liu2014adaptive}.
 
-\paragraph{Ưu điểm.} (i)~Có khả năng \emph{thoát local optima} nhờ
-tính ngẫu nhiên trong lựa chọn của từng kiến; (ii)~tự nhiên hỗ trợ
-multi-objective qua hàm chi phí tổng hợp; (iii)~không cần gradient,
-hoạt động trên không gian rời rạc rộng.
+\paragraph{Ưu điểm.} (i)~khả năng \emph{thoát khỏi cực tiểu địa phương}
+nhờ tính ngẫu nhiên trong lựa chọn của từng kiến; (ii)~hỗ trợ
+multi-objective một cách tự nhiên thông qua hàm chi phí tổng hợp;
+(iii)~không cần gradient, có thể hoạt động trên không gian rời rạc
+rộng.
 
-\paragraph{Hạn chế đối với ELDAS.} Ba nhược điểm cốt tử cho phạm vi
-đồ án này:
+\paragraph{Hạn chế đối với ELDAS.} Trong phạm vi đồ án này, ACO bộc lộ
+ba nhược điểm đáng kể:
 \begin{enumerate}
-  \item \textbf{Chi phí đánh giá khổng lồ.} ACO là population-based:
-        mỗi iteration cần $K$ kiến ($K \approx 20$--$50$) $\times$ một
-        episode mô phỏng đầy đủ. Với throughput đo được $65$\,step/s
+  \item \textbf{Chi phí đánh giá rất lớn.} ACO thuộc nhóm
+        population-based: mỗi iteration cần $K$ kiến
+        ($K \approx 20$--$50$) $\times$ một episode mô phỏng đầy đủ.
+        Với throughput đo được khoảng $65$\,step/s
         (§\ref{ssec:res-throughput}) và $\sim 2\,000$ task/episode,
-        một iteration ACO tốn $\sim 30$\,s $\times 30$ kiến $= 15$
-        phút; $100$ iteration hội tụ $\sim 25$ giờ \emph{cho một bộ
-        siêu tham số}.
-  \item \textbf{Không khái quát hoá.} Pheromone matrix $\tau_{ij}$
-        được học cho một workload cụ thể -- gặp workload mới phải
-        chạy lại từ đầu. Trái ngược với chính sách RL đã huấn luyện
-        có thể tổng quát hoá qua hàm xấp xỉ.
-  \item \textbf{Số siêu tham số lớn} ($\alpha, \beta, \rho, Q, K$,
-        chiến lược elitism, \dots) khiến reproducibility kém và
-        khó so sánh công bằng giữa các nghiên cứu.
+        một iteration ACO tiêu tốn khoảng $30$\,s $\times 30$ kiến
+        $\approx 15$ phút; $100$ iteration hội tụ tương đương
+        $\sim 25$ giờ \emph{cho một bộ siêu tham số duy nhất}.
+  \item \textbf{Khó khái quát hoá.} Ma trận pheromone $\tau_{ij}$ được
+        học riêng cho một workload cụ thể; khi gặp workload mới, phải
+        chạy lại từ đầu. Ngược lại, một chính sách RL đã huấn luyện
+        có khả năng khái quát hoá nhờ hàm xấp xỉ.
+  \item \textbf{Nhiều siêu tham số.} ACO có khá nhiều tham số cần
+        chỉnh ($\alpha, \beta, \rho, Q, K$, chiến lược elitism, \dots),
+        khiến khả năng tái lập kết quả thấp và việc so sánh công bằng
+        giữa các nghiên cứu trở nên khó khăn.
 \end{enumerate}
 
-\textbf{So sánh với PPO (định hướng của ELDAS).} PPO khắc phục cả ba
-nhược điểm trên: (i)~on-policy nhưng cập nhật \emph{mỗi episode}
-thay vì sau \emph{một quần thể episode}, tiết kiệm $K\times$ thời gian
-mô phỏng; (ii)~tổng quát hoá qua mạng nơ-ron -- một chính sách dùng cho
-nhiều workload; (iii)~ít siêu tham số chính (learning rate, clip
-$\epsilon$, GAE $\lambda$). Vì vậy ACO chỉ được đề cập như \emph{tham
-khảo so sánh} trong khảo sát, không được hiện thực trong ELDAS.
+\textbf{So sánh với PPO (định hướng của ELDAS).} PPO khắc phục được cả
+ba điểm yếu kể trên: (i)~tuy là on-policy, PPO cập nhật ngay sau
+\emph{mỗi episode} thay vì sau \emph{cả một quần thể episode}, tiết
+kiệm khoảng $K$ lần thời gian mô phỏng; (ii)~khái quát hoá qua mạng
+nơ-ron --- một chính sách có thể dùng cho nhiều workload; (iii)~chỉ có
+một vài siêu tham số chính (learning rate, clip $\epsilon$, GAE
+$\lambda$). Do đó, ACO chỉ được nhắc đến như \emph{tham chiếu so sánh}
+trong phần khảo sát, không được hiện thực trong ELDAS.
 
 \subsection{Kubernetes Scheduler}
 Kubernetes (K8s) là hệ điều phối container phổ biến nhất hiện
@@ -122,70 +129,79 @@ nay~\cite{kubernetes2024scheduler}. Bộ lập lịch mặc định
   \item \textbf{Bind.} Gắn pod vào node có điểm số cao nhất.
 \end{enumerate}
 
-\textbf{Hạn chế.} K8s scheduler không có cơ chế chấm điểm năng lượng và không
-hỗ trợ tối ưu đa mục tiêu nguyên thủy. Đây là khoảng trống mà các phương pháp
-học tăng cường có cơ hội cải thiện.
+\textbf{Hạn chế.} Bộ lập lịch của K8s không có hàm chấm điểm theo năng
+lượng, và bản thân nó không hỗ trợ tối ưu đa mục tiêu một cách nguyên thủy.
+Đây cũng chính là khoảng trống mà các phương pháp dựa trên học tăng cường
+có thể khai thác.
 
 \subsection{Lập lịch dựa trên học tăng cường: Deep Q-Network (DQN)}
 \label{ssec:dqn}
 
-Đột phá Atari của Mnih và cộng sự năm $2015$~\cite{mnih2015human}
-đưa \textit{Deep Q-Network} (DQN) trở thành thuật toán RL được khảo sát
-phổ biến nhất cho scheduling sau đó. DQN học hàm giá trị
-\textbf{Q-function} $Q(s, a)$ -- ước lượng tổng reward kỳ vọng khi
+Kết quả đột phá của Mnih và cộng sự trên bộ trò chơi Atari năm
+$2015$~\cite{mnih2015human} đã đưa \textit{Deep Q-Network} (DQN) trở
+thành một trong những thuật toán RL được khảo sát phổ biến nhất cho
+bài toán scheduling trong giai đoạn sau đó. DQN học hàm giá trị
+\textbf{Q-function} $Q(s, a)$ --- ước lượng tổng reward kỳ vọng khi
 thực hiện hành động $a$ từ trạng thái $s$. Thay vì tính trực tiếp,
-DQN dùng mạng nơ-ron xấp xỉ Q và cập nhật theo nguyên lý Bellman:
-phần thưởng hiện tại cộng với giá trị tốt nhất có thể đạt được ở bước
-sau. Hai kỹ thuật then chốt giúp ổn định quá trình học là \textbf{target
-network} (một bản sao mạng được đóng băng định kỳ, tránh ``mục tiêu di
-động'') và \textbf{replay buffer} (lưu trữ kinh nghiệm rồi lấy mẫu
-ngẫu nhiên, phá vỡ tương quan thời gian giữa các bước liên tiếp).
+DQN dùng một mạng nơ-ron để xấp xỉ $Q$ và cập nhật theo nguyên lý
+Bellman: phần thưởng hiện tại cộng với giá trị tốt nhất có thể đạt
+được ở bước kế tiếp. Hai kỹ thuật then chốt giúp quá trình học ổn
+định là \textbf{target network} (một bản sao mạng được đóng băng định
+kỳ để tránh hiện tượng ``mục tiêu di động'') và \textbf{replay buffer}
+(lưu lại kinh nghiệm rồi lấy mẫu ngẫu nhiên, phá vỡ tương quan thời
+gian giữa các bước liên tiếp).
 
-\paragraph{Ưu điểm.} (i)~\textbf{Sample-efficient hơn on-policy}: cùng
-một mẫu kinh nghiệm có thể được tái sử dụng nhiều lần qua replay
-buffer, lý tưởng khi mỗi episode đắt như mô phỏng CloudSim;
-(ii)~\textbf{tự nhiên cho discrete action space} -- $\arg\max_a Q$
-là toán tử kiểm soát mặc định, phù hợp với $H = 10$ lựa chọn host;
-(iii)~biến thể \textit{Rainbow DQN} (kết hợp PER, Double DQN, Dueling,
-Distributional) hiện đạt SOTA trên nhiều benchmark.
+\paragraph{Ưu điểm.} (i)~\textbf{Tiết kiệm mẫu hơn so với nhóm
+on-policy}: cùng một mẫu kinh nghiệm có thể được tái sử dụng nhiều
+lần qua replay buffer --- một lợi thế rõ rệt khi mỗi episode mô phỏng
+CloudSim đều tốn kém; (ii)~\textbf{phù hợp tự nhiên với không gian
+hành động rời rạc}: phép $\arg\max_a Q$ là toán tử kiểm soát mặc
+định, ăn khớp với $H = 10$ lựa chọn host; (iii)~biến thể
+\textit{Rainbow DQN} (kết hợp PER, Double DQN, Dueling, Distributional)
+hiện đang giữ SOTA trên nhiều benchmark.
 
-\paragraph{Hạn chế đối với ELDAS.} Bốn lý do then chốt khiến DQN
-\emph{không} phải lựa chọn tối ưu cho bài toán Phase 2:
+\paragraph{Hạn chế đối với ELDAS.} Có bốn lý do khiến DQN \emph{không}
+phải lựa chọn tối ưu cho phạm vi Phase 2:
 \begin{enumerate}
-  \item \textbf{Reward lệch tỉ lệ gây value over-estimation.}
-        Reward energy của ELDAS luôn âm với biên độ $\sim 10^3$\,Ws,
-        trong khi reward SLA thưa và biên độ phụ thuộc mức độ vi phạm.
-        DQN chọn hành động bằng $\arg\max_a Q$, dễ bị \emph{bias dương}
-        (overestimate) khi phân phối Q có hai thành phần lệch nhau hai
-        bậc độ lớn. PPO khắc phục qua \textit{advantage normalisation} --
-        chuẩn hoá $A_t$ về mean 0, std 1 trước mỗi lần cập nhật.
-  \item \textbf{Action masking phức tạp hơn.} Host không đủ tài nguyên
-        phải bị cấm tuyệt đối. Với DQN cần chặn ở hai chỗ -- bước chọn
-        hành động $\epsilon$-greedy \emph{và} bước $\max_{a'}$ trong
-        Bellman backup -- mỗi chỗ có biến thể chưa chuẩn hoá trong
-        literature. Với PPO, chỉ cần mask một lần ở policy head; thư
-        viện \texttt{sb3-contrib} đã có \texttt{MaskablePPO} sẵn sàng.
-  \item \textbf{Không hỗ trợ vector reward nguyên thuỷ.} Q-function trả
-        về vô hướng cho mỗi cặp $(s,a)$; muốn dùng cho MORL phải
-        \emph{scalarize trước khi học}, dẫn tới phải huấn luyện lại từ
-        đầu với mỗi trọng số $\mathbf{w}$ -- chi phí cao đúng bằng
-        linear scalarization của PPO. Các biến thể chuyên dụng cho MORL
-        (\textit{Envelope-Q}, \textit{Pareto-DQN}) tồn tại nhưng phức
-        tạp hơn, không có triển khai SB3 sẵn sàng, không phù hợp với
-        phạm vi Phase 2.
-  \item \textbf{Off-policy + replay buffer khó song song hoá.} Phase 2
-        dự kiến chạy weight sweep ($K = 9$) qua \texttt{SubprocVecEnv}
-        để khai thác nhiều core CPU; PPO on-policy hợp tự nhiên với
-        kiến trúc này, trong khi DQN cần kiến trúc Ape-X / R2D2 phức
-        tạp hơn nhiều.
+  \item \textbf{Reward lệch biên độ dẫn tới ước lượng $Q$ thiên dương.}
+        Reward energy trong ELDAS luôn âm và có biên độ vào khoảng
+        $10^3$\,Ws, trong khi reward SLA thưa hơn và biên độ phụ thuộc
+        vào mức vi phạm. DQN chọn hành động dựa trên $\arg\max_a Q$,
+        nên dễ bị \emph{thiên dương} (overestimation) khi phân phối
+        $Q$ có hai thành phần chênh nhau tới hai bậc độ lớn. PPO xử lý
+        được vấn đề này bằng \textit{advantage normalisation} ---
+        chuẩn hoá $A_t$ về trung bình 0, độ lệch chuẩn 1 trước mỗi
+        bước cập nhật.
+  \item \textbf{Action masking phức tạp hơn.} Các host không đủ tài
+        nguyên cần bị cấm tuyệt đối. Trong DQN, điều này phải được
+        thực thi ở hai vị trí --- bước chọn hành động theo
+        $\epsilon$-greedy và bước $\max_{a'}$ trong Bellman backup ---
+        với nhiều biến thể chưa được chuẩn hoá trong literature.
+        Trong khi đó, với PPO chỉ cần mask một lần tại policy head, và
+        thư viện \texttt{sb3-contrib} đã có sẵn \texttt{MaskablePPO}.
+  \item \textbf{Không hỗ trợ vector reward một cách nguyên thuỷ.}
+        Q-function trả về vô hướng cho mỗi cặp $(s, a)$; muốn dùng
+        cho MORL thì phải \emph{scalarize trước khi học}, đồng nghĩa
+        với việc phải huấn luyện lại từ đầu cho từng trọng số
+        $\mathbf{w}$ --- mức chi phí ngang bằng với linear
+        scalarization của PPO. Các biến thể MORL chuyên dụng như
+        \textit{Envelope-Q} hay \textit{Pareto-DQN} có tồn tại, nhưng
+        phức tạp hơn, chưa có triển khai sẵn trên SB3 và do đó nằm
+        ngoài phạm vi Phase 2.
+  \item \textbf{Mô hình off-policy + replay buffer khó song song hoá.}
+        Phase 2 dự kiến chạy weight sweep ($K = 9$) qua
+        \texttt{SubprocVecEnv} để tận dụng nhiều core CPU; PPO
+        on-policy ăn khớp tự nhiên với kiến trúc này, trong khi DQN
+        đòi hỏi các kiến trúc phức tạp hơn nhiều như Ape-X hay R2D2.
 \end{enumerate}
 
-\textbf{So sánh với PPO (định hướng của ELDAS).} PPO ổn định hơn DQN
-trước reward lệch tỉ lệ nhờ hai cơ chế không có tương đương trong DQN:
-\emph{advantage normalisation} (triệt tiêu sự chênh lệch biên độ trước
-mỗi lần cập nhật) và \emph{trust region qua clipping} (giới hạn mức độ
-thay đổi chính sách ở mỗi bước, ngăn diverge khi SLA violation bùng
-phát bất ngờ). Chi tiết PPO được trình bày ở §\ref{sec:morl}.
+\textbf{So sánh với PPO (định hướng của ELDAS).} Trước phổ reward lệch
+biên độ, PPO ổn định hơn DQN nhờ hai cơ chế mà DQN không có tương
+đương: \emph{advantage normalisation} --- triệt tiêu chênh lệch biên
+độ trước mỗi lần cập nhật --- và \emph{trust region thông qua
+clipping} --- giới hạn mức thay đổi của chính sách ở mỗi bước, tránh
+hiện tượng diverge khi vi phạm SLA bất ngờ tăng vọt. Phần chi tiết về
+PPO được trình bày ở §\ref{sec:morl}.
 
 \begin{table}[H]
   \centering
@@ -229,29 +245,30 @@ trong đó:
   \item $P_{\mathrm{max}}$ -- công suất ở trạng thái tải tối đa ($U=1$).
 \end{itemize}
 
-Một quan sát quan trọng: $P_{\mathrm{idle}}$ thường chiếm $50$--$70\%$ của
-$P_{\mathrm{max}}$. Do đó, một host \textit{rảnh} vẫn tiêu tốn tới hơn nửa
-công suất so với khi chạy hết tải. Đây chính là cơ sở để các thuật toán
-\textit{consolidation} ưu tiên gom tác vụ vào ít host nhất rồi tắt các host
-còn lại.
+Có một đặc điểm đáng chú ý: $P_{\mathrm{idle}}$ thường chiếm tới
+$50$--$70\%$ của $P_{\mathrm{max}}$. Nói cách khác, một host ở trạng thái
+\textit{rảnh} vẫn tiêu tốn hơn phân nửa công suất so với khi chạy hết tải.
+Đây cũng là cơ sở để các thuật toán \textit{consolidation} ưu tiên gom tác
+vụ về ít host nhất có thể rồi tắt số host còn lại.
 
 \subsection{Tính tổng năng lượng theo thời gian rời rạc}
-Mô phỏng trong ELDAS hoạt động theo \textbf{thời gian rời rạc} với bước
-$\Delta t = 1\,\mathrm{s}$. Tổng năng lượng tiêu thụ của một host trong một
-khoảng thời gian gồm $K$ bước được tính bằng tổng đơn giản:
+Mô phỏng trong ELDAS chạy theo \textbf{thời gian rời rạc} với bước
+$\Delta t = 1\,\mathrm{s}$. Tổng năng lượng tiêu thụ của một host trong
+$K$ bước được tính bằng phép cộng dồn:
 \begin{equation}
   E_j \;=\; \sum_{k=1}^{K} P_j\!\left(U_j^{(k)}\right) \cdot \Delta t,
   \label{eq:energy-discrete}
 \end{equation}
-và năng lượng toàn cụm là $E = \sum_{j=1}^{m} E_j$. Cách rời rạc hóa này
-tránh được tích phân, đồng thời ánh xạ trực tiếp xuống \textit{event loop}
-của CloudSim Plus (xem Chương~4).
+và năng lượng toàn cụm là $E = \sum_{j=1}^{m} E_j$. Cách rời rạc hoá này
+ánh xạ trực tiếp xuống \textit{event loop} của CloudSim Plus
+(xem Chương~4), nên không cần đến phép tích phân giải tích.
 
 \subsection{Mở rộng cho GPU}
-CloudSim Plus phiên bản 8.5.7 chưa có khái niệm GPU nguyên thủy. ELDAS bổ
-sung lớp theo dõi GPU riêng và áp dụng cùng dạng tuyến tính với hai mức công
-suất $P^{\mathrm{gpu}}_{\mathrm{idle}}$ và $P^{\mathrm{gpu}}_{\mathrm{max}}$
-lấy từ tài liệu kỹ thuật của NVIDIA A100~\cite{nvidia2023a100}.
+CloudSim Plus phiên bản 8.5.7 chưa có khái niệm GPU một cách nguyên thủy.
+ELDAS bổ sung thêm một lớp theo dõi GPU riêng, dùng chung dạng công thức
+tuyến tính với hai mức công suất $P^{\mathrm{gpu}}_{\mathrm{idle}}$ và
+$P^{\mathrm{gpu}}_{\mathrm{max}}$ lấy từ tài liệu kỹ thuật của NVIDIA
+A100~\cite{nvidia2023a100}.
 
 \subsection{Power Usage Effectiveness (PUE)}
 Để phản ánh chi phí năng lượng \textit{vận hành} (làm mát, chiếu sáng, mạng),
@@ -267,169 +284,170 @@ ELDAS sử dụng giá trị mặc định $\mathrm{PUE} = 1{,}5$ để quy đ�
 sang chi phí thực tế khi báo cáo.
 
 \subsection{Lý do chọn mô hình tuyến tính cho Phase 1}
-Có ba lý do chính:
+Việc dừng lại ở mô hình tuyến tính trong Phase 1 dựa trên ba lý do:
 \begin{enumerate}
-  \item \textbf{Đủ độ chính xác cho mục tiêu so sánh tương đối.} Sai số trung
-        bình so với đo thực nghiệm chỉ khoảng $5$--$7\%$~\cite{beloglazov2012energy}
-        -- đủ để xếp hạng giữa các scheduler.
-  \item \textbf{Đơn giản và tái sản xuất được.} Chỉ cần hai tham số trên mỗi
-        loại thiết bị, dễ tinh chỉnh và minh bạch.
-  \item \textbf{Tránh phụ thuộc DVFS.} Mô hình phi tuyến (cubic, logarithmic)
-        và \textit{Dynamic Voltage and Frequency Scaling} (DVFS) đòi hỏi dữ
-        liệu tần số/điện áp theo thời gian thực -- không có sẵn trong Alibaba
-        trace. Để cho Phase 2 hoặc nghiên cứu mở rộng.
+  \item \textbf{Đủ chính xác cho mục đích so sánh tương đối.} Sai số
+        trung bình so với phép đo thực nghiệm chỉ vào khoảng
+        $5$--$7\%$~\cite{beloglazov2012energy} --- đủ để xếp hạng các
+        scheduler.
+  \item \textbf{Đơn giản và dễ tái lập.} Mỗi loại thiết bị chỉ cần hai
+        tham số, vừa dễ tinh chỉnh, vừa minh bạch khi viết lại trong
+        báo cáo.
+  \item \textbf{Tránh phụ thuộc vào DVFS.} Các mô hình phi tuyến (bậc
+        ba, logarit) và cơ chế \textit{Dynamic Voltage and Frequency
+        Scaling} (DVFS) cần dữ liệu tần số/điện áp theo thời gian
+        thực --- Alibaba trace không cung cấp các trường này, do đó
+        phần mở rộng được giữ lại cho Phase 2 hoặc cho hướng nghiên
+        cứu sau.
 \end{enumerate}
-
-\begin{figure}[H]
-  \centering
-  \fbox{\parbox[c][4.5cm][c]{0.7\textwidth}{\centering
-    \textit{[Hình 2.1 -- Đồ thị $P(U)$: tuyến tính (đường thẳng) và phi tuyến
-    cubic (đường cong) trên cùng trục]}}}
-  \caption{So sánh mô hình công suất tuyến tính và phi tuyến.}
-  \label{fig:power-models}
-\end{figure}
 
 % ============================================================
 \section{Học tăng cường đa mục tiêu (MORL)}
 \label{sec:morl}
 
 \subsection{Markov Decision Process (MDP)}
-Học tăng cường (\textit{Reinforcement Learning} -- RL) mô hình hóa bài toán
-ra quyết định tuần tự dưới dạng \textit{Markov Decision
-Process}~\cite{sutton2018reinforcement}: tại mỗi bước, \textbf{agent} quan
-sát \textbf{trạng thái} môi trường, chọn một \textbf{hành động}, nhận
-\textbf{phần thưởng} và chuyển sang trạng thái mới. Quá trình lặp đi lặp lại
-cho đến khi kết thúc episode. Mục tiêu là học một \textbf{chính sách} -- ánh
-xạ từ trạng thái sang hành động -- sao cho tổng phần thưởng tích luỹ (có chiết
-khấu theo thời gian) là lớn nhất.
+Học tăng cường (\textit{Reinforcement Learning} --- RL) mô hình hoá bài
+toán ra quyết định tuần tự dưới dạng \textit{Markov Decision
+Process}~\cite{sutton2018reinforcement}. Ở mỗi bước, \textbf{agent} quan
+sát \textbf{trạng thái} của môi trường, chọn một \textbf{hành động}, nhận
+về một \textbf{phần thưởng} rồi chuyển sang trạng thái mới; quá trình
+này được lặp lại cho đến khi episode kết thúc. Mục tiêu của agent là học
+một \textbf{chính sách} --- một ánh xạ từ trạng thái sang hành động ---
+sao cho tổng phần thưởng tích luỹ (có chiết khấu theo thời gian) đạt giá
+trị lớn nhất.
 
 \subsection{Multi-Objective MDP (MOMDP)}
-Khi có \textbf{nhiều mục tiêu xung đột}, phần thưởng không còn là một số đơn
-lẻ mà trở thành một \textbf{vector phần thưởng}~\cite{roijers2013survey,
-hayes2022practical}. Trong ELDAS, mỗi bước agent nhận hai phần thưởng riêng
-biệt: $R^{\mathrm{energy}}$ (năng lượng tiêu thụ bước đó, luôn âm) và
-$R^{\mathrm{SLA}}$ (mức độ vi phạm deadline, bằng 0 nếu đúng hạn).
+Khi xuất hiện \textbf{nhiều mục tiêu xung đột}, phần thưởng không còn là
+một số vô hướng đơn lẻ mà trở thành một \textbf{vector phần
+thưởng}~\cite{roijers2013survey, hayes2022practical}. Trong ELDAS, ở
+mỗi bước agent nhận đồng thời hai phần thưởng riêng biệt:
+$R^{\mathrm{energy}}$ --- mức năng lượng tiêu thụ trong bước đó, luôn
+mang giá trị âm --- và $R^{\mathrm{SLA}}$ --- mức vi phạm deadline,
+bằng 0 nếu tác vụ xong đúng hạn.
 
 \subsection{Pareto Optimality}
-Vì không thể \textit{cộng} hai mục tiêu khác đơn vị một cách tự nhiên (Joule
-và giây trễ), khái niệm tối ưu phải mở rộng thành \textbf{Pareto optimality}
-(đã định nghĩa trong §1.2). Trong không gian giá trị kỳ vọng của vector phần
-thưởng, tập các chính sách không bị thống trị tạo thành \textit{Pareto front}
-$\mathcal{P}^*$.
+Do không thể cộng trực tiếp hai mục tiêu khác đơn vị (Joule và giây
+trễ), khái niệm tối ưu phải được mở rộng thành \textbf{Pareto
+optimality} (đã được định nghĩa ở §1.2). Trong không gian giá trị kỳ
+vọng của vector phần thưởng, tập các chính sách không bị thống trị tạo
+thành \textit{Pareto front} $\mathcal{P}^*$.
 
-\textbf{Tại sao cần vector reward thay vì scalar?} Nếu cộng gộp ngay từ đầu
-$R = w_1 R_1 + w_2 R_2$ với một $\mathbf{w}$ cố định, agent chỉ học được
-\textit{một điểm} trên Pareto front. Giữ nguyên dạng vector cho phép:
-(i)~quét trọng số sau huấn luyện để khôi phục nhiều điểm; (ii)~áp dụng các
-thuật toán MORL đặc thù như \textit{Envelope Q-Learning} hay
-\textit{Pareto-DQN} ở các nghiên cứu sau.
+\textbf{Vì sao cần vector reward thay vì giá trị vô hướng?} Nếu cộng gộp
+ngay từ đầu $R = w_1 R_1 + w_2 R_2$ với một $\mathbf{w}$ cố định, agent
+chỉ học được \emph{một điểm} duy nhất trên Pareto front. Giữ phần
+thưởng ở dạng vector mang lại hai lợi ích: (i)~có thể quét trọng số
+sau khi huấn luyện để dựng lại nhiều điểm trên Pareto front; (ii)~có
+thể áp dụng các thuật toán MORL chuyên biệt như \textit{Envelope
+Q-Learning} hay \textit{Pareto-DQN} trong các nghiên cứu kế tiếp.
 
-\begin{figure}[H]
-  \centering
-  \fbox{\parbox[c][4cm][c]{0.65\textwidth}{\centering
-    \textit{[Hình 2.2 -- Pareto front lý thuyết: trục hoành Energy, trục tung
-    SLA violation, đường cong nối các điểm không bị thống trị]}}}
-  \caption{Minh họa Pareto front trong không gian hai mục tiêu.}
-  \label{fig:pareto-front}
-\end{figure}
 
 \subsection{Proximal Policy Optimization (PPO)}
-PPO~\cite{schulman2017proximal} là thuật toán \textit{policy gradient} ổn
-định nhất hiện nay và được chọn cho Phase 2 của ELDAS. Ý tưởng cốt lõi: tại
-mỗi vòng cập nhật, hạn chế độ \textit{lệch} của chính sách mới so với chính
-sách cũ trong một \textit{vùng tin cậy}. Thay vì giải bài toán ràng buộc
-phức tạp, PPO sử dụng cơ chế \textbf{cắt tỉ số} (clipping) đơn giản: tỉ số
-xác suất giữa chính sách mới và cũ bị giới hạn trong khoảng
-$[1-\varepsilon,\, 1+\varepsilon]$ (thường $\varepsilon = 0{,}2$), ngăn mỗi
-bước cập nhật làm chính sách thay đổi quá lớn và gây diverge.
+PPO~\cite{schulman2017proximal} hiện là một trong những thuật toán
+\textit{policy gradient} ổn định nhất, và cũng là lựa chọn cho Phase 2
+của ELDAS. Ý tưởng chính của PPO khá đơn giản: ở mỗi vòng cập nhật, giữ
+độ \emph{lệch} của chính sách mới so với chính sách cũ trong một
+\textit{vùng tin cậy}. Thay vì đi giải một bài toán ràng buộc phức tạp,
+PPO áp dụng cơ chế \textbf{cắt tỉ số} (clipping): tỉ số xác suất giữa
+hai chính sách bị giới hạn trong khoảng $[1-\varepsilon,\, 1+\varepsilon]$
+(thường lấy $\varepsilon = 0{,}2$), nhờ đó mỗi bước cập nhật không thể
+kéo chính sách thay đổi quá lớn và gây diverge.
 
-\textbf{Tại sao chọn PPO?} (i)~ổn định nhất trong nhóm policy gradient;
-(ii)~ít siêu tham số, dễ tinh chỉnh; (iii)~hỗ trợ tốt trong
-\texttt{stable-baselines3}; (iv)~đã được chứng minh hiệu quả trên các bài
-toán scheduling tương tự~\cite{mao2016resource, decima2019}.
+\textbf{Vì sao chọn PPO?} (i)~ổn định nhất trong nhóm policy gradient;
+(ii)~ít siêu tham số, dễ tinh chỉnh; (iii)~được hỗ trợ tốt trong
+\texttt{stable-baselines3}; (iv)~đã chứng minh hiệu quả trên các bài
+toán scheduling tương
+tự~\cite{mao2016resource, decima2019}.
 
 \subsection{Linear Scalarization và quét trọng số}
-Cách đơn giản nhất để tối ưu vector phần thưởng là \textbf{cộng có trọng
-số}:
+Cách đơn giản nhất để tối ưu một vector phần thưởng là \textbf{cộng có
+trọng số}:
 \begin{equation}
   R^{\mathrm{scalar}}_t(\mathbf{w}) \;=\;
     w \cdot R^{\mathrm{energy}}_t \;+\; (1 - w) \cdot R^{\mathrm{SLA}}_t,
   \qquad w \in [0,1].
   \label{eq:linear-scalar}
 \end{equation}
-Mỗi $w$ tạo ra một bài toán RL đơn mục tiêu chuẩn, agent PPO sẽ hội tụ về
-một chính sách $\pi_w^*$ tối ưu cục bộ tại điểm vận hành đó. Bằng cách
-\textbf{quét trọng số} $w \in \{0{,}1,\, 0{,}2,\, \dots,\, 0{,}9\}$ và huấn
-luyện độc lập chín agent, ta thu được chín điểm xấp xỉ Pareto front. Phương
-pháp này có hai ưu điểm: (i)~tận dụng được mọi thuật toán RL đơn mục tiêu
-sẵn có; (ii)~dễ song song hóa.
+Mỗi giá trị $w$ tương ứng với một bài toán RL đơn mục tiêu chuẩn, agent
+PPO sẽ hội tụ về một chính sách $\pi_w^*$ tối ưu cục bộ tại điểm vận
+hành đó. Bằng cách \textbf{quét trọng số}
+$w \in \{0{,}1;\, 0{,}2;\, \dots;\, 0{,}9\}$ và huấn luyện độc lập chín
+agent, đồ án thu được chín điểm xấp xỉ trên Pareto front. Phương pháp
+này có hai lợi thế: (i)~tận dụng được mọi thuật toán RL đơn mục tiêu
+sẵn có; (ii)~dễ song song hoá.
 
-\textbf{Hạn chế.} Linear scalarization không thể khám phá các phần
-\textit{lõm} (concave) của Pareto front. Đây là điểm cần nhớ khi diễn giải
-kết quả Phase 2.
+\textbf{Hạn chế.} Linear scalarization không thể khôi phục được những
+đoạn \textit{lõm} (concave) của Pareto front. Đây là điều cần lưu ý khi
+diễn giải kết quả ở Phase 2.
 
 \subsection{Action Masking}
-Trong môi trường ELDAS, không phải mọi hành động đều hợp lệ tại mỗi trạng
-thái: nếu host $h_j$ không đủ tài nguyên cho tác vụ $\tau_i$, hành động
-``đặt $\tau_i$ lên $h_j$'' phải bị cấm. Cách giải quyết phổ biến trong RL là
-\textbf{action masking}~\cite{huang2022maskable}: tại mỗi bước, môi trường
-trả kèm một danh sách host khả thi, và các host không hợp lệ bị loại khỏi
-phân phối xác suất \emph{trước khi} chọn hành động -- tức xác suất chọn host
-không đủ tài nguyên bằng đúng $0$. ELDAS sử dụng \textit{MaskablePPO} từ thư
-viện \texttt{sb3-contrib} hiện thực sẵn cơ chế này. Lợi ích:
-(i)~loại bỏ hoàn toàn khả năng vi phạm ràng buộc capacity;
-(ii)~agent học nhanh hơn vì không lãng phí mẫu vào những hành động bị phạt
-cứng.
+Trong môi trường ELDAS, không phải hành động nào cũng hợp lệ tại mỗi
+trạng thái: nếu host $h_j$ không đủ tài nguyên cho tác vụ $\tau_i$, hành
+động ``đặt $\tau_i$ lên $h_j$'' phải bị cấm. Cách xử lý phổ biến trong
+RL là \textbf{action masking}~\cite{huang2022maskable}: ở mỗi bước, môi
+trường trả về kèm theo một danh sách các host khả thi, và những host
+không hợp lệ bị loại khỏi phân phối xác suất \emph{trước khi} agent
+chọn hành động --- nói cách khác, xác suất chọn một host không đủ tài
+nguyên bằng đúng $0$. ELDAS sử dụng \textit{MaskablePPO} trong
+\texttt{sb3-contrib} --- thư viện đã hiện thực sẵn cơ chế này. Cách
+làm đem lại hai lợi ích: (i)~loại bỏ hoàn toàn khả năng vi phạm ràng
+buộc capacity; (ii)~agent học nhanh hơn nhờ không phải lãng phí mẫu
+vào các hành động sẽ bị phạt cứng.
 
 % ============================================================
 \section{Nghiên cứu liên quan}
 \label{sec:related-work}
 
-Phần này khảo sát năm công trình tiêu biểu thuộc ba hướng nghiên cứu chính
-liên quan trực tiếp đến ELDAS: RL cho lập lịch tài nguyên, lập lịch đa mục
-tiêu cho năng lượng, và các framework mô phỏng/MORL.
+Phần này khảo sát năm công trình tiêu biểu, thuộc ba hướng nghiên cứu
+liên quan trực tiếp đến ELDAS: RL cho lập lịch tài nguyên, lập lịch đa
+mục tiêu kèm yếu tố năng lượng, và các framework mô phỏng / MORL.
 
 \subsection{DeepRM (Mao và cộng sự, 2016)}
-DeepRM~\cite{mao2016resource} là công trình tiên phong áp dụng \textit{Deep
-Reinforcement Learning} cho bài toán cấp phát tài nguyên cluster. Đóng góp
-chính: (i)~biểu diễn trạng thái cluster bằng \textit{ảnh hai chiều} (thời
-gian $\times$ tài nguyên), tận dụng kiến trúc CNN; (ii)~chứng minh agent
-DRL hội tụ và đánh bại heuristic Shortest-Job-First trong môi trường mô
-phỏng. \textbf{Hạn chế:} đơn mục tiêu (chỉ tối thiểu \textit{average job
-slowdown}); không xét năng lượng; quy mô nhỏ ($\le 20$ tác vụ đồng thời).
+DeepRM~\cite{mao2016resource} là một trong những công trình đầu tiên áp
+dụng \textit{Deep Reinforcement Learning} cho bài toán cấp phát tài
+nguyên cluster. Đóng góp chính của bài báo gồm: (i)~biểu diễn trạng
+thái cluster bằng \textit{ảnh hai chiều} (thời gian $\times$ tài
+nguyên), từ đó tận dụng được kiến trúc CNN; (ii)~chỉ ra rằng agent DRL
+có thể hội tụ và vượt heuristic Shortest-Job-First trong môi trường mô
+phỏng. \textbf{Hạn chế:} chỉ tối thiểu một mục tiêu duy nhất là
+\textit{average job slowdown}, không xét đến năng lượng và chỉ thử
+nghiệm ở quy mô nhỏ ($\le 20$ tác vụ đồng thời).
 
 \subsection{Decima (Mao và cộng sự, 2019)}
-Decima~\cite{decima2019} mở rộng hướng đi của DeepRM bằng \textit{Graph
-Neural Network} (GNN) để mô hình hóa Directed Acyclic Graph của các Spark
-job. Hệ thống được triển khai thực tế trên cụm $25$ máy và giảm
-\textit{average job completion time} $21\%$ so với scheduler mặc định của
-Spark. \textbf{Liên hệ với ELDAS:} cùng triết lý ``RL + simulation +
-deployment'', GNN được liệt kê là \textit{stretch goal} trong Phase 2 nếu
-MLP đã hội tụ.
+Decima~\cite{decima2019} mở rộng hướng đi của DeepRM, dùng \textit{Graph
+Neural Network} (GNN) để mô hình hoá Directed Acyclic Graph của các
+Spark job. Hệ thống đã được triển khai thực tế trên cụm $25$ máy và
+giảm \textit{average job completion time} $21\%$ so với bộ lập lịch
+mặc định của Spark. \textbf{Liên hệ với ELDAS:} cùng triết lý ``RL +
+simulation + deployment''; việc đưa GNN vào ELDAS được xếp ở mục
+\textit{stretch goal} trong Phase 2, sẽ chỉ tiến hành sau khi MLP đã
+hội tụ.
 
 \subsection{NSGA-II cho điều phối đám mây tiết kiệm năng lượng}
-Một dòng nghiên cứu khác sử dụng \textit{Non-dominated Sorting Genetic
+Một hướng nghiên cứu khác dùng \textit{Non-dominated Sorting Genetic
 Algorithm II} (NSGA-II)~\cite{deb2002fast} để giải bài toán đa mục tiêu
-năng lượng + QoS. Ưu điểm: thuật toán tiến hóa tự nhiên sinh ra cả Pareto
-front trong một lần chạy, không cần quét trọng số. \textbf{Nhược điểm:}
-mỗi lần ra quyết định cần đánh giá hàng nghìn cá thể, không phù hợp với
-\textit{online scheduling} thời gian thực -- đây là khoảng trống mà RL có
-ưu thế (chính sách đã huấn luyện chỉ cần một lần forward pass).
+năng lượng + QoS. Ưu điểm của hướng này là thuật toán tiến hoá có thể
+sinh ra cả Pareto front trong một lần chạy mà không cần quét trọng
+số. Tuy nhiên, mỗi lần ra quyết định lại đòi hỏi đánh giá hàng nghìn
+cá thể, nên không phù hợp với \textit{online scheduling} thời gian
+thực. Đây cũng chính là khoảng trống mà RL có lợi thế: chính sách đã
+huấn luyện chỉ cần một bước forward pass duy nhất khi suy luận.
 
 \subsection{Beware of Fragmentation (Weng và cộng sự, 2023)}
-Công trình~\cite{weng2023alibaba} công bố Alibaba PAI Cluster Trace v2023
-và đề xuất \textit{Fragmentation Gradient Descent} -- một heuristic giảm
-phân mảnh GPU tới $10\%$. \textbf{Liên hệ trực tiếp với ELDAS:} đây chính
-là nguồn dữ liệu workload mà ELDAS sử dụng; bài báo cũng cung cấp baseline
-heuristic mạnh để so sánh ở Phase 2.
+Công trình~\cite{weng2023alibaba} công bố Alibaba PAI Cluster Trace
+v2023 và đề xuất \textit{Fragmentation Gradient Descent} --- một
+heuristic giúp giảm phân mảnh GPU tới $10\%$. \textbf{Liên hệ trực
+tiếp với ELDAS:} đây chính là nguồn dữ liệu workload mà ELDAS sử dụng,
+đồng thời bài báo cũng cung cấp một baseline heuristic đủ mạnh để so
+sánh ở Phase 2.
 
 \subsection{MO-Gymnasium (Alegre và cộng sự, 2022)}
-MO-Gymnasium~\cite{alegre2022mogym} là framework chuẩn cho MORL benchmark,
-mở rộng API \texttt{step()} của Gymnasium để trả về vector phần thưởng. Thư
-viện cung cấp các môi trường tham chiếu (\textit{deep-sea-treasure},
-\textit{minecart}, \textit{four-room}) và bộ chỉ số đánh giá Pareto front
-(hypervolume, sparsity). \textbf{ELDAS đăng ký môi trường custom theo đúng
-chuẩn này}, đảm bảo tương thích với mọi thuật toán MORL trong tương lai.
+MO-Gymnasium~\cite{alegre2022mogym} là framework chuẩn cho các
+benchmark MORL, mở rộng API \texttt{step()} của Gymnasium để trả về
+vector phần thưởng. Thư viện cung cấp một số môi trường tham chiếu
+(\textit{deep-sea-treasure}, \textit{minecart}, \textit{four-room})
+cùng các chỉ số đánh giá Pareto front (hypervolume, sparsity). ELDAS
+đăng ký một môi trường custom theo đúng chuẩn này, từ đó có thể
+tương thích với mọi thuật toán MORL trong các nghiên cứu sau.
 
 \begin{table}[H]
   \centering
@@ -454,30 +472,168 @@ chuẩn này}, đảm bảo tương thích với mọi thuật toán MORL trong 
   \end{tabular}
 \end{table}
 
-\textbf{Định vị đóng góp.} Bảng~\ref{tab:related-work} cho thấy ELDAS lấp
-khoảng trống giao của bốn yêu cầu: \textit{đa mục tiêu}, \textit{tích hợp
-năng lượng}, \textit{theo dõi GPU}, và \textit{dùng workload trace thực}
-trong cùng một nền tảng MORL. Theo hiểu biết của nhóm tại thời điểm viết
-báo cáo (2026), chưa có công trình mở mã nguồn nào kết hợp đồng thời cả bốn
-đặc tính trên.
+\textbf{Định vị đóng góp.} Bảng~\ref{tab:related-work} cho thấy ELDAS
+lấp vào khoảng giao của bốn yêu cầu: \textit{đa mục tiêu}, \textit{tích
+hợp năng lượng}, \textit{theo dõi GPU} và \textit{sử dụng workload
+trace thực}, tất cả trong cùng một nền tảng MORL. Theo tìm hiểu của
+tác giả tại thời điểm viết báo cáo (2026), chưa có công trình mã nguồn
+mở nào kết hợp đồng thời cả bốn đặc tính này.
 
 % ============================================================
 \section{Công nghệ nền tảng}
 \label{sec:cong-nghe-nen-tang}
 
 \subsection{CloudSim Plus}
-CloudSim Plus~\cite{filho2017cloudsim} là framework mô phỏng \textit{rời rạc
-sự kiện} (\textit{discrete-event simulation}) cho điện toán đám mây, viết
-bằng Java 21. So với CloudSim gốc (Đại học Melbourne, 2009), CloudSim Plus
-tái cấu trúc theo các nguyên tắc kỹ thuật phần mềm hiện đại: API trôi chảy
-(\textit{fluent API}), tách biệt rõ \texttt{Host}/\texttt{Vm}/\texttt{Cloudlet},
-và tích hợp sẵn \texttt{PowerModel}.
+CloudSim Plus~\cite{filho2017cloudsim} là framework mô phỏng \textit{rời
+rạc sự kiện} (\textit{discrete-event simulation}) cho điện toán đám
+mây, viết bằng Java 21. So với CloudSim gốc (Đại học Melbourne, 2009),
+CloudSim Plus được tái cấu trúc lại theo các nguyên tắc kỹ thuật phần
+mềm hiện đại: API dạng \textit{fluent}, tách bạch rõ ràng
+\texttt{Host} / \texttt{Vm} / \texttt{Cloudlet}, và tích hợp sẵn
+\texttt{PowerModel}.
 
-\textbf{Lý do chọn:} (i)~mã nguồn mở, cộng đồng tích cực; (ii)~hỗ trợ
-\textit{event-driven} cho phép tạm dừng/tiếp tục mô phỏng -- yêu cầu bắt
-buộc của vòng lặp RL (xem §4.5); (iii)~mô hình năng lượng đã có sẵn cho
-CPU. \textbf{Hạn chế:} không hỗ trợ GPU -- ELDAS bổ sung lớp tracking
-riêng.
+\textbf{Lý do chọn:} (i)~mã nguồn mở, cộng đồng còn duy trì tích cực;
+(ii)~hoạt động \textit{event-driven}, cho phép tạm dừng và tiếp tục mô
+phỏng --- đây là yêu cầu bắt buộc của vòng lặp RL (xem §4.5);
+(iii)~đã có sẵn mô hình năng lượng cho CPU. \textbf{Hạn chế:} chưa hỗ
+trợ GPU, do đó ELDAS bổ sung thêm lớp tracking riêng.
+
+\paragraph{Bản chất mô phỏng host: POJO + DES, không Thread/Process.}
+Khác với một số công cụ mô phỏng đời đầu (SimJava và các nguyên mẫu
+CloudSim thuở sơ khai) vốn ánh xạ mỗi thực thể mô phỏng
+(Datacenter, Broker, Host, VM) thành một \texttt{java.lang.Thread}
+riêng biệt, CloudSim Plus
+\textbf{tái thiết kế toàn bộ theo mô hình hướng đối tượng điều khiển
+bằng sự kiện} (\textit{event-driven object model}). Mọi
+\texttt{Host}, \texttt{Vm}, \texttt{Cloudlet} thực chất chỉ là các
+\textit{Plain Old Java Object} (POJO) cư trú trên Heap của JVM,
+\emph{không} phải là Thread hay tiến trình hệ điều hành. Toàn bộ vòng
+lặp mô phỏng chạy trên \textbf{một luồng thực thi duy nhất}, liên tục
+rút đối tượng \texttt{SimEvent} từ một \textit{Priority Queue} có tên
+\texttt{FutureQueue} (sắp xếp theo timestamp), chuyển sang
+\texttt{DeferredQueue} khi đã đến hạn, rồi gọi trực tiếp phương thức
+\texttt{processEvent()} của đối tượng đích. Đồng hồ mô phỏng
+(\textit{simulation clock}) không trôi theo thời gian thực mà
+\emph{nhảy vọt} từ sự kiện này sang sự kiện kế tiếp, nhờ vậy có thể
+``tua nhanh'' qua các khoảng trống không có sự kiện. Quyết định kiến
+trúc này quan trọng vì ba lý do: (i)~triệt tiêu chi phí
+\textit{context switch} và \textit{lock contention} của hệ điều hành
+khi quy mô lên tới hàng vạn host; (ii)~đảm bảo \textbf{tính xác định}
+(determinism) --- cùng một random seed luôn cho ra kết quả giống hệt
+nhau, điều kiện tiên quyết cho nghiên cứu khoa học; (iii)~tiết kiệm
+bộ nhớ vì mỗi Thread JVM tốn $\sim 512$\,KB stack, trong khi một POJO
+chỉ tốn vài chục byte.
+
+\paragraph{Ưu điểm.} (i)~\textit{Reproducibility tuyệt đối} nhờ
+single-threaded loop và POJO; (ii)~API \textit{fluent} và mô hình
+object-chaining (\texttt{cloudlet.getVm().getHost()}) giảm boilerplate;
+(iii)~hỗ trợ sẵn \texttt{PowerModel}, các bộ lập lịch CPU
+(\texttt{TimeShared}, \texttt{SpaceShared}, mô phỏng CFS của Linux),
+auto-scaling theo \textit{Event Listener}, và đọc trace từ Google
+Cluster / Alibaba dưới dạng stream; (iv)~có cơ chế \texttt{startSync()}
+cho phép \emph{tạm dừng} mô phỏng tại mỗi khoảng \texttt{runFor()} ---
+đúng cơ chế ELDAS dùng để chen vòng lặp RL qua Py4J (§4.5);
+(v)~thực nghiệm của nhóm phát triển trên kịch bản $20\,000$ host,
+$40\,000$ VM, $50\,000$ Cloudlet cho thấy CloudSim Plus chạy nhanh hơn
+CloudSim 4.0.0 từ $20\%$ tới hơn $90\%$ tuỳ thuật toán cấp
+phát~\cite{cloudsimplus2024perf}.
+
+\paragraph{Hạn chế và điểm nghẽn ở quy mô lớn.} Ngược lại, kiến trúc
+này cũng kéo theo bốn ràng buộc cần lưu ý khi xác định phạm vi đồ án:
+\begin{enumerate}
+  \item \textbf{Lõi đơn luồng không tận dụng được nhiều core.} Cho
+        phép chạy \emph{song song nhiều kịch bản độc lập} (mỗi kịch
+        bản một JVM hoặc một luồng lõi riêng), nhưng \emph{một}
+        Datacenter không thể phân tán event-loop ra nhiều CPU. Trần
+        thông lượng bị chặn bởi single-thread performance của CPU.
+  \item \textbf{Độ phức tạp $O(V \cdot H)$ của allocation policy.}
+        Các chính sách scoring đầy đủ (BestFit, WorstFit, K8s LRP,
+        meta-heuristic) phải duyệt qua mọi host khả thi cho mỗi VM
+        cần đặt; khi $V, H$ cùng đạt $10^4$, khâu cấp phát có thể tốn
+        hàng giờ CPU.
+  \item \textbf{Áp lực \textit{recursive update}.} Mỗi nhịp
+        \texttt{schedulingInterval}, Datacenter gọi đệ quy\\
+        \texttt{updateVmsProcessing()} qua toàn bộ Host $\to$ VM $\to$
+        Cloudlet. Thí nghiệm trên Google Cluster Trace cho thấy với
+        $10\,000$ host, mô phỏng \emph{hai ngày} dữ liệu thực có thể
+        tốn tới \emph{bảy ngày} wall-time;
+        điểm nghẽn lớn nhất là vòng lặp cập nhật chứ không phải
+        thuật toán cấp phát.
+  \item \textbf{Áp lực JVM Garbage Collector.} Một episode dài với
+        hàng triệu \texttt{SimEvent} và\\ \texttt{HostStateHistoryEntry}
+        làm Heap đầy nhanh; các đợt \textit{Stop-The-World GC} của
+        G1GC/Shenandoah có thể đóng băng tiến trình hàng giây. Trần
+        thực tế của một JVM $16$\,GB RAM nằm vào khoảng
+        $10^4$--$10^5$ host trên cùng một mô phỏng.
+  \item \textbf{Không có GUI.} Cấu hình hoàn toàn bằng mã Java hoặc
+        YAML; rào cản đối với người dùng không lập trình hệ thống.
+\end{enumerate}
+
+\paragraph{Định vị quy mô datacenter của ELDAS.}
+\label{para:datacenter-scale}
+Việc thấu hiểu các điểm nghẽn nói trên trực tiếp ấn định
+\emph{khoảng quy mô khả thi} của một thí nghiệm CloudSim Plus, và
+qua đó định vị ELDAS trên thang đo công nghiệp.
+Bảng~\ref{tab:datacenter-scale} so sánh ba mức quy mô tham chiếu.
+
+\begin{table}[H]
+  \centering
+  \caption{So sánh quy mô datacenter ELDAS với các mức công nghiệp.}
+  \label{tab:datacenter-scale}
+  \footnotesize
+  \begin{tabular}{lccc}
+    \toprule
+    \textbf{Tiêu chí} & \textbf{ELDAS (Phase 1)} &
+        \textbf{Normal-scale} & \textbf{Hyperscale} \\
+    \midrule
+    Số host vật lý        & $10$ (mở rộng được $50$)
+                          & $10^2$--$10^3$
+                          & $10^5$--$10^6$ \\
+    Loại đại diện         & Lab / micro-cluster
+                          & Cluster học thuật, edge DC
+                          & Google, AWS, Azure region \\
+    \#vCPU/host           & $16$ (cấu hình được)
+                          & $32$--$128$
+                          & $96$--$192$ \\
+    GPU/host              & $0$--$4$ (mô phỏng)
+                          & $0$--$8$
+                          & $8$+ (cụm AI dedicated) \\
+    \#task/episode        & $\sim 2 \cdot 10^3$ (Alibaba)
+                          & $10^4$--$10^5$
+                          & $10^7$+ trên ngày \\
+    PUE điển hình         & $1{,}5$ (giả định)
+                          & $1{,}5$--$1{,}8$
+                          & $1{,}10$--$1{,}15$~\cite{google2023datacenter} \\
+    Khả năng tái lập      & Tuyệt đối (1 seed)
+                          & Khó (multi-tenant)
+                          & Không thể \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+ELDAS rõ ràng thuộc nhóm \textbf{lab-scale / micro-cluster}: $10$
+host, vài nghìn task/episode trên trace Alibaba đã được lọc về một
+window đại diện. Mức quy mô này có hai hệ quả cần khẳng định trong
+phần giới hạn:
+\begin{itemize}
+  \item \textbf{Đủ để chứng minh thuật toán.} Với $10$ host và
+        $6$ scheduler, không gian hành động (10 host) và không
+        gian trạng thái ($6H+4 = 64$ chiều) đủ rộng để tạo ra
+        \emph{Pareto front có thể quan sát}: chênh lệch năng lượng
+        BestFit$\leftrightarrow$RoundRobin đạt $\sim 20$--$26\%$ (xem
+        Chương~5), và PPO-min đã có vị trí interior Pareto thực sự
+        --- đủ chứng minh giả thuyết MORL khả thi trên CloudSim
+        Plus.
+  \item \textbf{Không đại diện cho hyperscale.} Tại quy mô
+        $10^5$+ host, các yếu tố trở nên chi phối mà ELDAS không
+        mô phỏng: phân tầng mạng đa lớp, fault domain, multi-zone
+        replication, năng lượng làm mát phụ thuộc nhiệt độ ngoài
+        trời, và đặc biệt là chi phí lập lịch đệ quy phình theo
+        $O(V \cdot H)$ đã nêu. Một thí nghiệm CloudSim Plus
+        $10\,000$+ host sẽ vướng cả ba điểm nghẽn ở mục trên và đòi
+        hỏi hạ tầng JVM riêng ($\geq 32$\,GB Heap, GC tinh chỉnh).
+        Đây là giới hạn được nêu rõ trong Chương~\ref{chap:ket-luan}.
+\end{itemize}
 
 \subsection{Py4J -- cầu nối Java--Python}
 Py4J~\cite{py4j2024} là thư viện cho phép code Python gọi trực tiếp các đối
@@ -508,32 +664,35 @@ tượng Java trong cùng JVM thông qua \textit{GatewayServer}. Cơ chế:
   \end{tabular}
 \end{table}
 
-Vì vòng lặp RL có thể gọi \texttt{step()} hàng nghìn lần mỗi episode, Py4J
-là lựa chọn cân bằng tốt nhất giữa hiệu năng và độ phức tạp triển khai.
+Do vòng lặp RL có thể gọi \texttt{step()} tới hàng nghìn lần mỗi
+episode, Py4J là phương án cân bằng tốt nhất giữa hiệu năng và độ phức
+tạp triển khai.
 
 \subsection{MO-Gymnasium}
-Là một \textit{fork} của Gymnasium được Alegre và cộng sự duy
-trì~\cite{alegre2022mogym}. Khác biệt API quan trọng nhất: hàm
-\texttt{step(action)} trả về \texttt{(obs, reward\_vector, terminated,
-truncated, info)} với \texttt{reward\_vector} $\in \mathbb{R}^d$ thay vì
-một số thực. ELDAS đăng ký môi trường \texttt{ELDAS-v0} kế thừa lớp
-\texttt{MOEnv}, đảm bảo có thể \textit{plug-and-play} với mọi thuật toán
-MORL hỗ trợ chuẩn này.
+MO-Gymnasium là một \textit{fork} của Gymnasium do Alegre và cộng sự
+duy trì~\cite{alegre2022mogym}. Khác biệt quan trọng nhất nằm ở API
+\texttt{step(action)}: hàm này trả về \texttt{(obs, reward\_vector,
+terminated, truncated, info)}, với \texttt{reward\_vector} $\in
+\mathbb{R}^d$ thay vì một số thực. ELDAS đăng ký môi trường
+\texttt{ELDAS-v0} kế thừa từ lớp \texttt{MOEnv}, qua đó có thể
+\textit{plug-and-play} với mọi thuật toán MORL tuân theo chuẩn này.
 
 \subsection{Docker Compose}
-Toàn bộ hệ thống được đóng gói bằng Docker Compose v2 với hai service
-(\texttt{cloudsim-java}, \texttt{rl-agent}) và ba volume chia sẻ
-(\texttt{trace-data}, \texttt{metrics}, \texttt{checkpoints}). Mục tiêu là
-\textbf{tái sản xuất được} (\textit{reproducibility}): bất kỳ ai có Docker
-đều có thể chạy lại thực nghiệm với một câu lệnh duy nhất:
+Toàn bộ hệ thống được đóng gói bằng Docker Compose v2, gồm hai service
+(\texttt{cloudsim-java}, \texttt{rl-agent}) cùng ba volume chia sẻ
+(\texttt{trace-data}, \texttt{metrics}, \texttt{checkpoints}). Mục tiêu
+là khả năng \textbf{tái lập kết quả} (\textit{reproducibility}): bất
+kỳ ai có Docker đều có thể chạy lại thực nghiệm bằng một câu lệnh duy
+nhất:
 \begin{lstlisting}[style=yamlstyle, caption={Khởi chạy hệ thống.}, label={lst:run}]
 docker compose up --build
 \end{lstlisting}
 
 \subsection{So sánh với KWOK}
-KWOK (\textit{Kubernetes WithOut Kubelet}) là một lựa chọn thay thế phổ
-biến cho việc mô phỏng cluster K8s ở quy mô lớn. Bảng~\ref{tab:kwok-vs-cloudsim}
-tóm tắt vì sao ELDAS chọn CloudSim Plus thay vì KWOK ở Phase 1.
+KWOK (\textit{Kubernetes WithOut Kubelet}) là một lựa chọn thay thế khá
+phổ biến để mô phỏng cluster K8s ở quy mô lớn.
+Bảng~\ref{tab:kwok-vs-cloudsim} tóm lược lý do ELDAS chọn CloudSim Plus
+thay vì KWOK ở Phase 1.
 
 \begin{table}[H]
   \centering
@@ -554,20 +713,22 @@ tóm tắt vì sao ELDAS chọn CloudSim Plus thay vì KWOK ở Phase 1.
   \end{tabular}
 \end{table}
 
-Ưu thế quyết định của CloudSim Plus là \textit{discrete-event} -- cho phép
-mô phỏng ``tua nhanh'' qua các khoảng không có sự kiện, giúp một episode RL
-hoàn thành trong vài giây thay vì vài giờ thời gian thực.
+Lợi thế quyết định của CloudSim Plus nằm ở cơ chế
+\textit{discrete-event}: mô phỏng có thể ``tua nhanh'' qua các khoảng
+không có sự kiện, nhờ vậy một episode RL chỉ mất vài giây thay vì vài
+giờ thời gian thực.
 
 % ============================================================
 \section{Kết luận chương}
 \label{sec:ket-luan-c2}
 
-Chương này đã cung cấp nền tảng lý thuyết cho ba quyết định thiết kế cốt
-lõi của ELDAS: (i)~chọn \textbf{mô hình năng lượng tuyến tính} vì cân bằng
-độ chính xác và tính tái sản xuất; (ii)~chọn \textbf{PPO + linear
-scalarization} làm thuật toán nền cho Phase 2 vì ổn định và dễ song song
-hóa; (iii)~chọn ngăn xếp công nghệ \textbf{CloudSim Plus + Py4J +
-MO-Gymnasium} vì khả năng pause/resume mô phỏng và tương thích chuẩn MORL.
-Bảng tổng hợp ở §2.4 cũng đã chỉ rõ vị trí và đóng góp của ELDAS so với
-các công trình liên quan. Chương kế tiếp sẽ trình bày kiến trúc bốn lớp
-hiện thực hóa các quyết định này.
+Chương này đã đặt nền tảng lý thuyết cho ba quyết định thiết kế cốt lõi
+của ELDAS: (i)~chọn \textbf{mô hình năng lượng tuyến tính} vì cân bằng
+được độ chính xác và khả năng tái lập; (ii)~chọn \textbf{PPO kết hợp
+linear scalarization} làm thuật toán nền cho Phase 2 nhờ tính ổn định
+và dễ song song hoá; (iii)~chọn ngăn xếp công nghệ \textbf{CloudSim
+Plus + Py4J + MO-Gymnasium} vì khả năng pause/resume mô phỏng và mức
+độ tương thích với chuẩn MORL. Bảng tổng hợp ở §2.4 cũng đã định rõ vị
+trí và đóng góp của ELDAS trong tương quan với các công trình liên
+quan. Chương kế tiếp sẽ trình bày kiến trúc bốn lớp hiện thực hoá các
+quyết định nói trên.

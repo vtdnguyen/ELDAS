@@ -10,106 +10,118 @@
 \label{sec:ket-luan-dong-gop}
 
 Đồ án chuyên ngành \textbf{ELDAS} đặt mục tiêu xây dựng một nền tảng
-mô phỏng và lập lịch tác vụ AI trong datacenter dựa trên học tăng cường
-đa mục tiêu (MORL). Báo cáo này trình bày kết quả Phase 1 -- giai đoạn
-\emph{xây dựng nền tảng kỹ thuật và thiết lập đường tham chiếu} -- với
-sáu đóng góp có thể kiểm chứng độc lập:
+mô phỏng và lập lịch tác vụ AI trong datacenter dựa trên học tăng
+cường đa mục tiêu (MORL). Báo cáo này trình bày kết quả Phase 1 ---
+giai đoạn xây dựng nền tảng kỹ thuật và thiết lập đường tham
+chiếu --- với sáu đóng góp có thể kiểm chứng độc lập:
 
 \begin{enumerate}
   \item \textbf{Kiến trúc bốn lớp với contract rõ ràng}
-        (Chương~\ref{chap:kien-truc}). Bốn lớp Docker / CloudSim Plus /
-        Py4J / MO-Gymnasium được tách rời tới mức có thể \emph{thay
-        engine mô phỏng} hoặc \emph{thay thuật toán RL} mà không phải
-        sửa các lớp còn lại -- điều kiện tiên quyết cho cả Phase 2 lẫn
-        các hướng nghiên cứu mở rộng.
-  \item \textbf{Engine mô phỏng có theo dõi GPU} (§\ref{ssec:impl-factory}).
-        CloudSim Plus 8.5.7 nguyên bản không có khái niệm GPU; ELDAS
-        bổ sung lớp \texttt{GpuState} qua \texttt{IdentityHashMap},
-        áp công thức năng lượng tuyến tính riêng cho GPU
-        (\eqref{eq:gpu-power}), không phải fork thư viện ngoài.
-  \item \textbf{Tích hợp dữ liệu workload thực} (Alibaba PAI Cluster
-        Trace v2023). Parser chịu lỗi \texttt{AlibabaTraceReader} và
-        bộ lọc \texttt{ScenarioFilter} với ba kịch bản tải Low/High/Burst
+        (Chương~\ref{chap:kien-truc}). Bốn lớp Docker / CloudSim
+        Plus / Py4J / MO-Gymnasium được tách rời tới mức có thể
+        thay engine mô phỏng hoặc đổi thuật toán RL mà không cần
+        chỉnh các lớp còn lại --- đây cũng là điều kiện tiên quyết
+        cho Phase 2 và các hướng nghiên cứu mở rộng.
+  \item \textbf{Engine mô phỏng có theo dõi GPU}
+        (§\ref{ssec:impl-factory}). CloudSim Plus 8.5.7 nguyên bản
+        chưa có khái niệm GPU; ELDAS bổ sung lớp \texttt{GpuState}
+        thông qua \texttt{IdentityHashMap} kèm công thức năng lượng
+        tuyến tính riêng cho GPU (\eqref{eq:gpu-power}), tránh phải
+        fork thư viện gốc.
+  \item \textbf{Tích hợp dữ liệu workload thực} từ Alibaba PAI
+        Cluster Trace v2023. Parser chịu lỗi
+        \texttt{AlibabaTraceReader} kết hợp bộ lọc
+        \texttt{ScenarioFilter} cho ba kịch bản tải Low/High/Burst
         (§\ref{ssec:impl-trace}, §\ref{ssec:impl-baselines}).
-  \item \textbf{Cầu nối ngôn ngữ tốc độ cao} (§\ref{sec:layer-py4j}).
-        Py4J được biện luận chọn hơn gRPC/REST nhờ độ trễ
-        $\sim 0{,}1$\,ms; vận hành đo được cho phép $\sim 970$\,step/s
-        qua bốn lớp (Bảng~\ref{tab:smoke-results}).
-  \item \textbf{Vector reward + action masking} (§\ref{sec:layer-mogym}).
-        Môi trường tuân thủ chuẩn MO-Gymnasium 1.0+; reward giữ dạng
-        vector hai chiều; cơ chế \texttt{action\_masks()} của
-        MaskablePPO đảm bảo chính sách không sinh hành động vi phạm
-        \eqref{eq:capacity}.
-  \item \textbf{Tính tái sản xuất bit-for-bit} (§\ref{ssec:impl-build},
-        §\ref{ssec:res-repro}). Docker Compose + version pinning +
-        \texttt{RANDOM\_SEED} chung cho cả Java và Python. Bằng chứng:
-        \texttt{diff} hai run cùng seed cho output rỗng
-        (Hình~\ref{fig:repro}).
+  \item \textbf{Cầu nối ngôn ngữ tốc độ cao}
+        (§\ref{sec:layer-py4j}). Py4J được lựa chọn thay vì gRPC
+        hay REST nhờ độ trễ chỉ $\sim 0{,}1$\,ms; vận hành thực tế
+        cho phép $\sim 970$ step/s qua bốn lớp
+        (Bảng~\ref{tab:smoke-results}).
+  \item \textbf{Vector reward kết hợp action masking}
+        (§\ref{sec:layer-mogym}). Môi trường tuân thủ chuẩn
+        MO-Gymnasium 1.0+, giữ reward ở dạng vector hai chiều; cơ
+        chế \texttt{action\_masks()} của MaskablePPO bảo đảm chính
+        sách không sinh ra hành động vi phạm \eqref{eq:capacity}.
+  \item \textbf{Khả năng tái lập đến từng bit}
+        (§\ref{ssec:impl-build}, §\ref{ssec:res-repro}). Docker
+        Compose, version pinning và \texttt{RANDOM\_SEED} dùng
+        chung cho cả Java lẫn Python. Bằng chứng: \texttt{diff}
+        hai run cùng seed trả về output rỗng (Hình~\ref{fig:repro}).
 \end{enumerate}
 
-Kết quả thực nghiệm (Chương~\ref{chap:ket-qua}) đã \emph{đối chiếu thành
-công} cả sáu mục tiêu MT1--MT6 (Bảng~\ref{tab:mt-checklist}). Hai
-baseline -- Random và Kubernetes LRP -- đặt sẵn đường tham chiếu cho
-Phase 2: K8s LRP tiết kiệm năng lượng $\sim \TODOnum{8\%}$ so với
-Random và giảm vi phạm SLA $2\text{--}\TODOnum{2{,}5\times}$ trên ba
-kịch bản, cho thấy đây là baseline \emph{không tầm thường} mà MORL phải
-vượt qua.
+Kết quả thực nghiệm ở Chương~\ref{chap:ket-qua} đã đối chiếu thành
+công cả sáu mục tiêu MT1--MT6 (Bảng~\ref{tab:mt-checklist}). Sau
+khi mở rộng phạm vi sang Phase 1.8 (state-machine năng lượng cùng
+ba baseline cổ điển bổ sung), \textbf{năm baseline} --- FirstFit,
+BestFit, RoundRobin, K8s LRP và Random --- đã đặt sẵn đường tham
+chiếu Pareto cho Phase 2. Trên kịch bản HIGH, chênh lệch năng lượng
+giữa BestFit (pack-tight, $21\,817$\,kWh) và RoundRobin (spread,
+$27\,369$\,kWh) lên đến $\mathbf{20{,}3\%}$; SLA reward đi theo
+chiều ngược lại, K8s LRP tốt hơn BestFit khoảng $3{,}7$ lần. Đây
+là một Pareto front \emph{không tầm thường} với ba cụm rõ rệt:
+agent MORL phải cải thiện đồng thời trên cả hai trục, chứ không
+chỉ một trục như giả định ban đầu của báo cáo.
 
 % ============================================================
 \section{Bài học kinh nghiệm}
 \label{sec:bai-hoc}
 
-Bốn bài học kỹ thuật nổi bật được rút ra trong quá trình hiện thực:
+Bốn bài học kỹ thuật nổi bật mà bản thân tác giả rút ra được trong
+quá trình hiện thực:
 
-\paragraph{Cô lập biên giới ngôn ngữ.}
-Khi tích hợp Java và Python, cám dỗ là phơi cấu trúc dữ liệu nội bộ ra
-cả hai phía. Quyết định giữ \texttt{GatewayEntryPoint} chỉ phơi
-\emph{record nguyên thuỷ} (Bảng~\ref{tab:gw-api}) đã chứng tỏ giá trị:
-khi cần đổi backend, biên giới chỉ là chín phương thức mảnh, không
-phải hàng trăm field rải rác.
+\paragraph{Giữ chặt biên giới giữa hai ngôn ngữ.}
+Khi tích hợp Java và Python, cám dỗ thường gặp là phơi luôn các cấu
+trúc dữ liệu nội bộ ra cả hai phía. Quyết định giữ
+\texttt{GatewayEntryPoint} chỉ phơi các \emph{record nguyên thuỷ}
+(Bảng~\ref{tab:gw-api}) đã chứng tỏ giá trị của mình: khi cần đổi
+backend, biên giới giữa hai ngôn ngữ chỉ còn là chín phương thức gọn,
+chứ không phải hàng trăm field rải rác.
 
-\paragraph{Pause/Resume = vấn đề tinh tế nhất.}
-Cấu trúc \texttt{SynchronousQueue} cho phép \emph{tránh khoá tường
-minh} trong khi vẫn đồng bộ chính xác hai luồng. Đây là mẫu thiết kế
-chuẩn cho mọi tích hợp \emph{event-driven simulator + on-policy RL} --
-nên áp dụng lại trong các dự án tương lai.
+\paragraph{Cơ chế pause/resume là phần tinh tế nhất.}
+Cặp \texttt{SynchronousQueue} cho phép tránh hoàn toàn việc dùng
+khoá tường minh mà vẫn đồng bộ chính xác giữa hai luồng. Đây là một
+mẫu thiết kế chuẩn cho việc tích hợp giữa một \emph{event-driven
+simulator} và một thuật toán RL on-policy, và rất đáng để áp dụng
+lại ở các dự án tương lai.
 
-\paragraph{Manual tracking đôi khi tốt hơn ``làm đúng'' API.}
+\paragraph{Đôi khi theo dõi thủ công lại tốt hơn ``dùng đúng'' API.}
 Việc cố ý \emph{không} gọi \texttt{simulation.start()} ở Phase 1
-(§\ref{ssec:impl-sim-manager}) là quyết định có chủ đích, được lock-in
-bằng comment trong source và bằng dòng tài liệu trong \texttt{CLAUDE.md}.
-Bài học chung: khi engine bên thứ ba có hành vi gây nguy hiểm, bypass
-\emph{có kiểm soát} an toàn hơn ``hack cho hết warning''.
+(§\ref{ssec:impl-sim-manager}) là một quyết định có chủ đích, được
+ghim chặt bằng comment trong source. Bài học chung: khi một engine bên thứ ba có hành
+vi tiềm tàng nguy hiểm, đi đường vòng \emph{có kiểm soát} an toàn hơn
+là cố ``vá cho hết warning''.
 
-\paragraph{Reproducibility là hệ quả của kỷ luật, không phải may mắn.}
-Mọi seed, mọi version, mọi đường dẫn được pin chặt; trace có hash MD5;
-hai run cùng tham số thực sự cho output trùng byte-for-byte. Khi báo
-cáo kết quả nghiên cứu, cam kết này là \emph{nền tảng đạo đức học
-thuật} -- không thể thoả hiệp được.
+\paragraph{Khả năng tái lập là kết quả của kỷ luật, không phải may mắn.}
+Mọi seed, mọi version và mọi đường dẫn đều được pin chặt; trace có
+hash MD5; hai run với cùng tham số thực sự cho output trùng đến từng
+byte. Khi công bố kết quả nghiên cứu, đây là cam kết tối thiểu cần
+phải có, không thể thoả hiệp.
 
 % ============================================================
 \section{Lời kết}
 \label{sec:loi-ket}
 
-Lập lịch tác vụ AI trong datacenter dưới ràng buộc đa mục tiêu là một
-trong những bài toán \emph{ngày càng đắt giá} của ngành công nghiệp
-tính toán hiện đại: mỗi điểm phần trăm năng lượng tiết kiệm trên một
-cluster A100 quy mô vừa tương đương hàng chục nghìn USD chi phí điện
-mỗi năm và hàng tấn $\mathrm{CO_2}$ tránh phát thải. Phase 1 của ELDAS
-đã đặt nền móng để câu hỏi này có thể được \emph{đo lường, lặp lại và
-so sánh công bằng} trong môi trường nghiên cứu. Phase 2 sẽ trả lời câu
-hỏi định lượng tiếp theo: \emph{liệu MORL có thực sự vượt được
-Kubernetes LRP -- một baseline đã được vận hành trong sản xuất hàng
-chục năm}? Câu trả lời, dù ``có'' hay ``không'', đều có giá trị đối
-với cộng đồng nghiên cứu Việt Nam và quốc tế.
+Bài toán lập lịch tác vụ AI trong datacenter dưới các ràng buộc đa
+mục tiêu đang ngày càng tốn kém với ngành công nghiệp tính toán
+hiện đại: chỉ một phần trăm năng lượng tiết kiệm được trên một
+cluster A100 quy mô vừa cũng đã tương đương với hàng chục nghìn USD
+chi phí điện mỗi năm, cùng hàng tấn $\mathrm{CO_2}$ tránh được phát
+thải. Phase 1 của ELDAS đã đặt nền móng để câu hỏi này có thể được
+đo lường, lặp lại và so sánh một cách công bằng trong môi trường
+nghiên cứu. Phase 2 sẽ tiếp tục trả lời câu hỏi định lượng kế tiếp:
+liệu MORL có thực sự vượt được Kubernetes LRP --- một baseline đã
+được vận hành trong sản xuất suốt nhiều năm --- hay không? Dù câu
+trả lời là ``có'' hay ``không'', kết quả này đều có giá trị tham
+khảo cho cộng đồng nghiên cứu trong nước và quốc tế.
 
 \bigskip
 \noindent
-Hệ thống ELDAS được công bố mã nguồn mở kèm cấu hình Docker Compose
-đầy đủ, hy vọng sẽ là một điểm khởi đầu hữu ích cho các đề tài kế
-tiếp về lập lịch xanh, học tăng cường đa mục tiêu, và tối ưu hoá hệ
-thống phân tán -- những hướng nghiên cứu thiết yếu trong cam kết
-Net-Zero $2050$ của Việt Nam.
+Hệ thống ELDAS được công bố dưới dạng mã nguồn mở, kèm cấu hình
+Docker Compose đầy đủ, với mong muốn trở thành điểm khởi đầu cho
+các đề tài kế tiếp về lập lịch xanh, học tăng cường đa mục tiêu và
+tối ưu hệ thống phân tán --- những hướng nghiên cứu thiết yếu trong
+lộ trình Net-Zero $2050$ của Việt Nam.
 
 \begin{flushright}
 \textit{TP. Hồ Chí Minh, tháng 05 năm 2026}\\

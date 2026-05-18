@@ -1,0 +1,24 @@
+{
+  "k8s": {
+    "scheduler": "k8s",
+    "scenario": "BURST",
+    "seed": 42,
+    "steps": 3569,
+    "total_energy_reward": -2827463.75,
+    "total_sla_reward": -213897.49590861797,
+    "mean_energy_reward": -792.2285654244887,
+    "mean_sla_reward": -59.93205265021518,
+    "total_energy_kwh": 14409.925755208333
+  },
+  "random": {
+    "scheduler": "random",
+    "scenario": "BURST",
+    "seed": 42,
+    "steps": 3569,
+    "total_energy_reward": -3393233.75,
+    "total_sla_reward": -3043998.5875639915,
+    "mean_energy_reward": -950.751961333707,
+    "mean_sla_reward": -852.8995762297538,
+    "total_energy_kwh": 14409.925755208333
+  }
+}

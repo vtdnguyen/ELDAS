@@ -1,0 +1,21 @@
+# T5.5 — Auto-provision Prometheus as the default datasource.
+#
+# Grafana loads any *.yml in this directory on startup. Once Grafana is up,
+# the datasource exists with UID "eldas-prometheus" without manual setup.
+#
+# The URL uses Docker DNS — Prometheus is reachable as "prometheus" from
+# the Grafana container because they share the sim-net bridge.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: eldas-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: "2s"
+      httpMethod: POST

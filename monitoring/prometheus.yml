@@ -1,0 +1,43 @@
+# T5.2 — Prometheus scrape config for ELDAS.
+#
+# Two targets:
+#   1. cloudsim-java:9091   — Java exporter (long-running, primary source).
+#                              Sim-thread pushes per-host gauges + counters
+#                              into the simpleclient registry; HTTPServer
+#                              serves /metrics. Always up while the JVM is.
+#   2. rl-agent:8000        — Python exporter (ephemeral, Phase-2 only).
+#                              Container only exists during a training run
+#                              or smoke test, so being "down" is expected.
+#
+# scrape_interval is short (2s) because RL episodes are dense — host
+# utilisation can change between every step. Bumping to 5–10s during long
+# training is fine and reduces Prometheus storage cost.
+
+global:
+  scrape_interval: 2s
+  scrape_timeout: 1s
+  # No external_labels — we tag inside the application via host_id /
+  # scenario / scheduler. Keeping this empty avoids label collisions when
+  # results are exported / federated later.
+
+scrape_configs:
+  - job_name: cloudsim_java
+    static_configs:
+      - targets: ["cloudsim-java:9091"]
+        labels:
+          source: java
+    metrics_path: /metrics
+
+  - job_name: rl_agent
+    # rl-agent is ephemeral (`docker compose run --rm …`). When no episode
+    # is running the container is gone; Prometheus will log "context
+    # deadline exceeded" once per cycle — that is expected and harmless.
+    static_configs:
+      - targets: ["rl-agent:8000"]
+        labels:
+          source: python
+    metrics_path: /metrics
+    # honor_labels lets the Python side override scenario/scheduler labels
+    # if it wants to (e.g. exposing per-experiment labels). Falls back to
+    # the static label above otherwise.
+    honor_labels: true

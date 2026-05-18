@@ -42,18 +42,27 @@ docker compose run --rm rl-agent python src/smoke_test.py \
 
 \section*{A.3.\ Cấu trúc thư mục output}
 
-\begin{lstlisting}[style=yamlstyle, caption={Layout of generated data.}]
+\begin{lstlisting}[style=yamlstyle, caption={Layout of generated data (Phase 1.8).}]
 data/
 |-- alibaba-trace/
 |   `-- openb_pod_list_default.csv         # input, read-only
+|-- models/                                # named volume in Docker
+|   `-- ppo-min.zip                        # PPO-min checkpoint (T8.9)
 `-- results/
     |-- smoke/
-    |   |-- metrics.csv                    # 9 cols x N tasks
-    |   `-- summary.json                   # 9 aggregate fields
-    `-- baseline-{LOW|HIGH|BURST}/
-        |-- k8s/{metrics.csv, summary.json}
-        |-- random/{metrics.csv, summary.json}
-        `-- baseline_results.json          # both schedulers
+    |   |-- metrics.csv                    # widened: per-host cols
+    |   `-- summary.json                   # widened: state-machine fields
+    |-- baseline-{LOW|HIGH|BURST}/
+    |   |-- bestfit/    {metrics.csv, summary.json}
+    |   |-- firstfit/   {metrics.csv, summary.json}
+    |   |-- roundrobin/ {metrics.csv, summary.json}
+    |   |-- k8s/        {metrics.csv, summary.json}
+    |   |-- random/     {metrics.csv, summary.json}
+    |   |-- ppo-min/    {metrics.csv, summary.json}  # only HIGH
+    |   `-- baseline_results.json          # 5 baselines + ppo-min
+    |-- baseline-{LOW|HIGH|BURST}-flat/    # pre-state-machine archive
+    `-- phase1-comparison/
+        `-- summary-{HIGH|LOW|BURST}.json  # 6-row table dump
 \end{lstlisting}
 
 \section*{A.4.\ Biến môi trường (\texttt{.env})}
@@ -64,6 +73,23 @@ ENERGY_WEIGHT=0.8        # default w_e for ScalarRewardWrapper
 SLA_WEIGHT=0.2           # w_s; auto-normalised so total = 1
 RANDOM_SEED=42           # shared seed for Java + Python
 WANDB_API_KEY=           # leave empty for WandB offline mode
+
+# -- T7.1: topology override (env > sys-prop > default) -------
+NUM_HOSTS=10             # number of hosts in the datacenter
+VCPU_PER_HOST=64         # CPU PEs per host
+GPU_PER_HOST=8           # GPUs per host
+RAM_PER_HOST_GB=256      # RAM per host in GB
+MIPS_PER_PE=10000        # MIPS per CPU PE
+
+# -- T8.1: host state-machine knobs ---------------------------
+IDLE_THRESHOLD_SEC=30    # IDLE -> SUSPENDED grace window (sim-time)
+P_SUSPENDED_W=10         # power draw while SUSPENDED (BMC + memory)
+WAKE_ENERGY_KWH=0.0005   # one-shot wake-up bonus
+WAKE_LATENCY_SEC=5       # added to task completion on wake-up
+
+# -- T5: observability (Phase 1.5) ---------------------------
+MONITORING_ENABLED=false # set true to enable Prometheus exporter
+METRICS_PORT=9091        # Java exporter port
 \end{lstlisting}
 
 % ============================================================

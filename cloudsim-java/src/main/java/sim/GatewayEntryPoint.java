@@ -35,8 +35,12 @@ public class GatewayEntryPoint {
     private SimulationManager manager;
 
     // Baseline policy instances (rebuilt on each reset)
-    private VmAllocationPolicyK8sDefault k8sPolicy;
-    private VmAllocationPolicyRandom     randomPolicy;
+    private VmAllocationPolicyK8sDefault    k8sPolicy;
+    private VmAllocationPolicyRandom        randomPolicy;
+    // T8.4 / T8.5 / T8.6 — three classical baselines added in Phase 1.8.
+    private VmAllocationPolicyFirstFit      firstFitPolicy;
+    private VmAllocationPolicyBestFit       bestFitPolicy;
+    private VmAllocationPolicyRoundRobin    roundRobinPolicy;
 
     // ════════════════════════════════════════════════════════════════════════
     //  LIFECYCLE
@@ -52,17 +56,30 @@ public class GatewayEntryPoint {
     public StepResult reset(String scenarioName, long seed) {
         Scenario scenario = Scenario.valueOf(scenarioName.toUpperCase(Locale.ROOT));
 
+        // T5.3 — Tag the upcoming episode for Prometheus. Scheduler defaults
+        // to "rl"; selectBaselineAction overrides it if a baseline drives the
+        // run. Safe no-op when monitoring is disabled.
+        MetricsRegistry.setContext(scenario.name(), "rl");
+
+        // T7.1 — Use the env-driven constructor so NUM_HOSTS / VCPU_PER_HOST /
+        // GPU_PER_HOST / RAM_PER_HOST_GB (and T8.1 state-machine knobs) are
+        // re-read on every resetSimulation(). The fromEnv() call inside
+        // SimulationManager.buildSimulation handles parsing and fallbacks.
         manager = new SimulationManager(
-                SimulationConfig.DEFAULT_DC,
-                SimulationConfig.TRACE_FILE,
-                scenario,
-                seed);
+                SimulationConfig.TRACE_FILE, scenario, seed);
 
         StepResult result = manager.resetSimulation();
 
-        // Rebuild baseline policies with the fresh GPU registry
-        k8sPolicy    = new VmAllocationPolicyK8sDefault(manager.getGpuRegistry());
-        randomPolicy = new VmAllocationPolicyRandom(manager.getGpuRegistry(), seed);
+        // Rebuild baseline policies. They read live resource state through
+        // the manager (see java-validation-report §B1), not from CloudSim's
+        // Host API which always reports full capacity. RoundRobin is also
+        // state-ful (rotating pointer) — re-creating it on every reset gives
+        // a fresh pointer at index 0, matching reproducibility expectations.
+        k8sPolicy        = new VmAllocationPolicyK8sDefault(manager);
+        randomPolicy     = new VmAllocationPolicyRandom(manager, seed);
+        firstFitPolicy   = new VmAllocationPolicyFirstFit(manager);
+        bestFitPolicy    = new VmAllocationPolicyBestFit(manager);
+        roundRobinPolicy = new VmAllocationPolicyRoundRobin(manager);
 
         System.out.printf("[GatewayEntryPoint] Reset: scenario=%s, seed=%d, "
                         + "hosts=%d, tasks=%d%n",
@@ -121,10 +138,10 @@ public class GatewayEntryPoint {
         return manager.getHostCount();
     }
 
-    /** Length of the observation vector ({@code 3H + 4}). */
+    /** Length of the observation vector ({@code 6H + 4}, T8.9). */
     public int getObservationSize() {
         requireManager();
-        return 3 * manager.getHostCount() + 4;
+        return 6 * manager.getHostCount() + 4;
     }
 
     /** Whether the current episode has finished. */
@@ -159,10 +176,13 @@ public class GatewayEntryPoint {
      * Ask a baseline policy to select a host for the current task.
      * Used by {@code baseline_eval.py} to run episodes with non-RL schedulers.
      *
-     * <p>Supported policy names:
+     * <p>Supported policy names (case-insensitive):
      * <ul>
      *   <li>{@code "k8s"} — Kubernetes default (Filter + LeastRequestedPriority)</li>
      *   <li>{@code "random"} — uniform random among feasible hosts</li>
+     *   <li>{@code "firstfit"} — first feasible host in index order (T8.4)</li>
+     *   <li>{@code "bestfit"} — pack tightest-fit feasible host (T8.5)</li>
+     *   <li>{@code "roundrobin"} — rotate through hosts in index order (T8.6)</li>
      * </ul>
      *
      * @param policyName policy identifier (case-insensitive)
@@ -177,13 +197,32 @@ public class GatewayEntryPoint {
             return 0;
         }
         TaskRecord task = manager.getTasks().get(taskIdx);
+        List<org.cloudsimplus.hosts.Host> hosts = manager.getHosts();
+
+        // T5.3 — Reflect the active baseline policy in Prometheus labels.
+        // Called every step; the underlying assignment is a cheap volatile write.
+        MetricsRegistry.setSchedulerTag(policyName);
 
         return switch (policyName.toLowerCase(Locale.ROOT)) {
-            case "k8s"    -> k8sPolicy.selectHostForTask(manager.getHosts(), task);
-            case "random" -> randomPolicy.selectHostForTask(manager.getHosts(), task);
+            case "k8s"        -> k8sPolicy       .selectHostForTask(hosts, task);
+            case "random"     -> randomPolicy    .selectHostForTask(hosts, task);
+            case "firstfit"   -> firstFitPolicy  .selectHostForTask(hosts, task);
+            case "bestfit"    -> bestFitPolicy   .selectHostForTask(hosts, task);
+            case "roundrobin" -> roundRobinPolicy.selectHostForTask(hosts, task);
             default -> throw new IllegalArgumentException(
-                    "Unknown policy: " + policyName + " (expected 'k8s' or 'random')");
+                    "Unknown policy: " + policyName
+                  + " (expected 'k8s', 'random', 'firstfit', 'bestfit', or 'roundrobin')");
         };
+    }
+
+    /**
+     * Override the scheduler tag used by the Prometheus exporter. Useful when
+     * Python drives a custom policy (e.g. a trained MORL agent) and wants to
+     * distinguish its runs from baselines in Grafana. Safe no-op when
+     * monitoring is disabled.
+     */
+    public void setSchedulerTag(String tag) {
+        MetricsRegistry.setSchedulerTag(tag);
     }
 
     // ════════════════════════════════════════════════════════════════════════

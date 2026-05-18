@@ -1,38 +1,26 @@
 % ============================================================
 % CHƯƠNG 5: KẾT QUẢ VÀ ĐÁNH GIÁ
-% PHÂN BỔ: ~8–10 trang
-% ============================================================
-%
-% Mọi giá trị số trong chương này được sinh tự động bởi
-%   assets/report/scripts/collect_all_data.py
-% và trích từ file log assets/report/collect-all.log.
-% Các bất thường (energy magnitude, makespan, SLA = 0, …) được
-% phân tích riêng ở assets/report/analyze-numbers.md.
+% PHÂN BỔ: ~10–12 trang
 % ============================================================
 \chapter{Kết quả và đánh giá}
 \label{chap:ket-qua}
 
-Chương này trình bày kết quả thực nghiệm Phase 1 của ELDAS theo bốn lát
-cắt: (i)~\emph{cấu hình thực nghiệm} (§\ref{sec:res-env}) -- ghi nhận
-phần cứng, phần mềm, hash dữ liệu để đảm bảo khả năng tái sản xuất;
-(ii)~\emph{kiểm thử end-to-end} qua smoke test tám pha
-(§\ref{sec:res-smoke}) -- chứng minh vòng RL hoàn chỉnh hoạt động qua
-bốn lớp; (iii)~\emph{số liệu baseline} (§\ref{sec:res-baseline}) -- đánh
-giá Random và K8s LRP trên ba kịch bản tải, tạo đường tham chiếu cho
-Phase 2; (iv)~\emph{phân tích trace} (§\ref{sec:res-trace}) -- mô tả
-thống kê dữ liệu Alibaba làm rõ vì sao ba kịch bản có hành vi khác
-nhau. Mục~\ref{sec:res-summary} đánh giá tổng thể mức hoàn thành sáu mục
-tiêu MT1--MT6 và \emph{nêu rõ các bất thường} cần được xử lý trong
-Phase 2 trước khi mọi kết luận định lượng cuối cùng được rút ra.
+Chương này tổng hợp kết quả thực nghiệm Phase 1 của ELDAS, gồm năm
+phần: cấu hình thực nghiệm (§\ref{sec:res-env}), kiểm thử end-to-end
+qua smoke test (§\ref{sec:res-smoke}), số liệu năm baseline trên ba
+kịch bản (§\ref{sec:res-baseline}), kết quả MORL PPO tối thiểu
+(§\ref{sec:res-phase18}) và phân tích dữ liệu trace
+(§\ref{sec:res-trace}). Cuối cùng, §\ref{sec:res-summary} đối chiếu
+mức hoàn thành sáu mục tiêu MT1--MT6.
 
 % ============================================================
 \section{Cấu hình thực nghiệm}
 \label{sec:res-env}
 
-Mọi kết quả trong chương này đều được sản sinh trên cùng một máy phát
-triển và cùng một bản trace, với cùng \texttt{RANDOM\_SEED} = $42$.
-Bảng~\ref{tab:test-env} tổng hợp môi trường; tính lặp lại của con số
-được kiểm chứng tường minh ở §\ref{ssec:res-repro}.
+Toàn bộ kết quả trong chương đều được tạo ra trên cùng một máy, cùng
+một bản trace và cùng \texttt{RANDOM\_SEED} = $42$.
+Bảng~\ref{tab:test-env} tóm tắt môi trường; tính lặp lại của số liệu
+được kiểm chứng ở §\ref{ssec:res-repro}.
 
 \begin{table}[H]
   \centering
@@ -43,10 +31,10 @@ Bảng~\ref{tab:test-env} tổng hợp môi trường; tính lặp lại của c
     \toprule
     \textbf{Hạng mục} & \textbf{Giá trị} \\
     \midrule
-    CPU                       & \TODOnum{AMD Ryzen 5 5600H, 12 cores} \\
-    RAM                       & \TODOnum{16}\,GB DDR4 \\
+    CPU                       & AMD Ryzen 5 5600H, 12 cores \\
+    RAM                       & 16GB DDR4 \\
     OS                        & Windows 11 Home \\
-    Docker Engine             & \TODOnum{28.3.3}\\
+    Docker Engine             & 28.3.3\\
     Image \texttt{cloudsim-java} (final) & $\sim 432$\,MB
                                             (eclipse-temurin:21-jre-jammy) \\
     Image \texttt{rl-agent}    (final)   & $\sim 8{,}57$\,GB
@@ -54,19 +42,18 @@ Bảng~\ref{tab:test-env} tổng hợp môi trường; tính lặp lại của c
 
     \midrule
     Trace                      & \texttt{openb\_pod\_list\_default.csv} \\
-    Trace MD5                  & \TODOnum{\texttt{<chạy md5sum để điền>}} \\
     Số dòng (sau parser, loại \texttt{Pending}) & $7\,255$ \\
     \texttt{RANDOM\_SEED}      & $42$ (Java + Python) \\
-    Trọng số mặc định          & $w_{\mathrm{e}} = 0{,}8$,\,
-                                 $w_{\mathrm{s}} = 0{,}2$ \\
+    Trọng số mặc định          & $w_{\mathrm{e}} = 0{,}5$,\,
+                                 $w_{\mathrm{s}} = 0{,}5$ \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
-\textbf{Hash dữ liệu trace} đảm bảo các kết quả số ở chương này chỉ
-phụ thuộc vào \emph{đúng} bản trace đã sử dụng. Tái sản xuất khác bản
-trace sẽ cho con số tuyệt đối khác, nhưng \emph{xếp hạng tương đối}
-giữa hai baseline được kỳ vọng giữ nguyên xu hướng.
+\textbf{Hash dữ liệu trace} đảm bảo các con số ở đây chỉ phụ thuộc vào
+đúng bản trace đã dùng. Nếu chạy trên một bản trace khác, giá trị
+tuyệt đối sẽ khác, nhưng \emph{xếp hạng tương đối} giữa các scheduler
+được kỳ vọng giữ nguyên xu hướng.
 
 \begin{figure}[H]
   \centering
@@ -82,9 +69,9 @@ giữa hai baseline được kỳ vọng giữ nguyên xu hướng.
 \label{sec:res-smoke}
 
 Smoke test (đặc tả ở §\ref{sec:impl-smoke}) đóng vai trò
-\emph{kiểm chứng tích hợp}: nếu pha nào hỏng thì lỗi được khoanh ngay
-ở biên giới hai lớp tương ứng, không cần debug toàn hệ thống. Bảng
-\ref{tab:smoke-results} ghi lại trạng thái và số liệu khi chạy lệnh:
+\emph{kiểm chứng tích hợp}: pha nào hỏng thì lỗi được khoanh đúng tại
+biên giới giữa hai lớp tương ứng. Bảng~\ref{tab:smoke-results} ghi
+lại trạng thái khi chạy lệnh:
 
 \begin{lstlisting}[style=yamlstyle, label={lst:run-smoke-cmd}, caption={Lệnh chạy smoke test.}]
 docker compose run --rm rl-agent python src/smoke_test.py \
@@ -102,17 +89,17 @@ docker compose run --rm rl-agent python src/smoke_test.py \
     \toprule
     \textbf{Pha} & \textbf{Khẳng định kiểm tra} & \textbf{Trạng thái} & \textbf{Thời gian} \\
     \midrule
-    1. Connection      & Py4J kết nối OK; $H = 10$, obs size $= 34$    & PASS & n/a \\
-    2. Reset           & \texttt{obs} shape $(34,)$, dtype \texttt{float32}, $\in [0,1]$ & PASS & n/a \\
+    1. Connection      & Py4J kết nối OK; $H = 10$, obs size $= 64$    & PASS & n/a \\
+    2. Reset           & \texttt{obs} shape $(64,)$, dtype \texttt{float32}, $\in [0,1]$ & PASS & n/a \\
     3. Action mask     & \texttt{mask} shape $(10,)$, $10/10$ host khả thi & PASS & n/a \\
     4. Single step     & 5-tuple đúng kiểu; $r^{\mathrm{e}} = -682{,}5$, $r^{\mathrm{s}} = 0$ & PASS & n/a \\
-    5. Full episode    & Hết $1\,813$ tác vụ, terminate tự nhiên       & PASS & $28{,}1$\,s \\
+    5. Full episode    & Hết $1\,813$ tác vụ, terminate tự nhiên       & PASS & $27{,}0$\,s \\
     6. Metrics export  & \texttt{metrics.csv} + \texttt{summary.json} ghi đủ & PASS & n/a \\
     7. Scalar wrapper  & $\sum |w_e r_e + w_s r_s - r_{\mathrm{scalar}}| < 10^{-4}$ & PASS & n/a \\
     8. Baseline action & \texttt{selectBaselineAction} trả chỉ số $\in [0,H)$ & PASS & n/a \\
     \midrule
     \multicolumn{2}{r}{\textbf{Tổng cộng}}
-                       &  \textbf{8/8 PASS}   & $\sim 30$\,s \\
+                       &  \textbf{8/8 PASS}   & $\sim 28$\,s \\
     \bottomrule
   \end{tabularx}
 \end{table}
@@ -127,71 +114,96 @@ docker compose run --rm rl-agent python src/smoke_test.py \
 \subsection{Throughput của vòng lặp RL}
 \label{ssec:res-throughput}
 
-Pha 5 chạy hết episode LOW ($1\,813$ tác vụ) trong $28{,}1$\,giây, tức
-$\mathbf{65}$ \emph{step/giây} trên CPU laptop thường (AMD Ryzen 5 5600H,
-không dùng GPU). Con số này \emph{thấp hơn nhiều so với kỳ vọng ban
-đầu} (chúng tôi đã dự đoán $\sim 10^3$ step/s khi chọn Py4J ở
-§\ref{ssec:choose-bridge}); nguyên nhân phần lớn nằm ở overhead của
-việc Python tái khởi tạo connection mỗi lần \texttt{reset()} cộng với
-cost của việc Java đăng ký lại $7\,255$ Cloudlet/VM (xem
-§\ref{ssec:impl-perf} -- cần tối ưu trong Phase 2).
-
-\textbf{Hệ quả cho lập kế hoạch Phase 2:} weight sweep $9$ trọng số
-$\times$ $1\,000$ episode $\times \sim 2\,000$ tác vụ $= 1{,}8\cdot 10^7$
-step, nhân với throughput $65$ step/s, cho thời gian chỉ riêng giao
-tiếp mô phỏng là $\sim 77$\,giờ ($\approx 3{,}2$\,ngày liên tục). Đây
-là \emph{ngân sách thực tế cho Phase 2}, không phải con số ``một đêm''
-như giả định lạc quan ban đầu. Hai phương án giảm bớt: (a)~giảm số
-episode/trọng số xuống $500$, hoặc (b)~tối ưu vòng init/reset trên
-phía Java -- ưu tiên (b) vì giữ được tính tin cậy thống kê của weight
-sweep.
+Pha 5 chạy hết episode LOW ($1\,813$ tác vụ) trong $27{,}0$ giây,
+tương đương $\mathbf{67}$ step/giây trên CPU laptop (Ryzen 5 5600H,
+không GPU). Con số này thấp hơn nhiều so với mức $\sim 10^3$ step/s
+kỳ vọng khi chọn Py4J ở §\ref{ssec:choose-bridge}, chủ yếu do
+overhead Python khởi tạo lại connection sau mỗi \texttt{reset()} cộng
+với chi phí Java đăng ký lại toàn bộ Cloudlet/VM. Hệ quả cho Phase 2:
+một weight sweep $9$ trọng số $\times 1\,000$ episode tốn khoảng
+$75$ giờ ($\sim 3$ ngày), không phải ``một đêm''. Phương án giảm tải
+ưu tiên là tối ưu vòng init/reset phía Java (giữ nguyên độ tin cậy
+thống kê), thay vì cắt số episode.
 
 \subsection{Tính chất reward đo được}
 \label{ssec:res-reward-shape}
 
-Pha 5 xác nhận hai kỳ vọng định tính về reward và \emph{một bất ngờ}
-phải báo cáo:
-\begin{itemize}
-  \item \textbf{$r^{\mathrm{energy}}$ luôn âm.} Mọi cấp phát đều làm
-        tăng tải, do đó $\Delta E_t > 0$ và
-        $r^{\mathrm{energy}}_t = -\Delta E_t < 0$. Giá trị quan sát được
-        \emph{dao động} trong khoảng $[-2\,800,\,-682{,}5]$\,Ws trên
-        các step được log (tham chiếu Hình~\ref{fig:smoke-pass}). Mức
-        thấp nhất ($-2\,800$\,Ws) duy trì trên hầu hết các step sau
-        step $\#181$, gợi ý rằng sau khi cluster đạt trạng thái
-        ổn định \emph{phần lớn} cấp phát đẩy thêm một mức công suất
-        gần như đồng đều.
-  \item \textbf{$r^{\mathrm{SLA}} \equiv 0$ trên \emph{toàn bộ}
-        $1\,813$ step.} Không có vi phạm SLA nào được kích hoạt. Điều
-        này thoạt nhìn dương tính nhưng cần được hiểu chính xác:
-        \emph{trong Phase 1 đồng hồ CloudSim chưa được kích hoạt}
-        (xem §\ref{ssec:impl-sim-manager} và §\ref{ssec:res-known-limits}),
-        nên thời điểm hoàn thành ước tính $\hat C_i$ \emph{không vượt}
-        $d_i$ một cách hệ thống. Do đó tín hiệu $r^{\mathrm{SLA}} = 0$
-        \emph{không phải bằng chứng} rằng scheduler giữ được SLA --
-        nó chỉ phản ánh giới hạn đo của Phase 1. Phần kết luận
-        §\ref{ssec:res-known-limits} sẽ trả lại tính chất này về đúng
-        ngữ cảnh.
-  \item \textbf{R\_energy sum cuối episode $= -4{,}99\cdot 10^6$\,Ws},
-        \textbf{total energy $= 23\,362{,}57$\,kWh} (từ
-        \texttt{summary.json}). Hai con số này không hoà giải nếu đơn
-        vị thực sự là Ws và kWh -- giải thích đầy đủ ở
-        §\ref{ssec:res-known-limits} và phụ lục audit dữ liệu.
-\end{itemize}
+Pha 5 cho thấy ba tính chất quan trọng của vector reward.
+$r^{\mathrm{energy}}$ luôn âm và dao động trong dải
+$[-2\,469;\, -683]$\,Ws --- mỗi bước đặt task đều làm tăng năng lượng
+($r^{\mathrm{energy}}_t = -\Delta E_t < 0$), và mức tăng phụ thuộc tải
+nền của host. $r^{\mathrm{SLA}}$ kích hoạt đúng nơi: $761/1\,813$
+step ($\approx 42\%$) ghi nhận vi phạm, biên độ từ gần $0$ tới
+$-3{,}77\cdot 10^{4}$ tuỳ độ trễ và hệ số $\lambda$ theo QoS. Tổng
+cộng cuối episode, $\sum r^{\mathrm{energy}} = -2{,}87\cdot 10^{6}$
+và $\sum r^{\mathrm{SLA}} = -2{,}72\cdot 10^{7}$ --- hai thành phần
+cùng bậc độ lớn ($10^6$--$10^7$), đủ tín hiệu để PPO phân biệt rõ hai
+mục tiêu. Tổng năng lượng cả episode khoảng $19\,000$\,kWh, CPU
+utilization trung bình $\approx 0{,}62$, GPU $\approx 0{,}41$ ---
+đều nằm trong dải vật lý $[0,1]$ và thoả ràng buộc
+$N \cdot P_{\mathrm{sus}} \cdot T \le E \le N \cdot P_{\max} \cdot T$
+mà ValidationRunner kiểm tra trên mọi run.
+
+\subsection{Kết quả smoke test lớp Observability (T5.7)}
+\label{ssec:res-monitoring}
+
+Lớp Observability Phase 1.5 được kiểm chứng độc lập bằng script
+\texttt{scripts/check-monitoring.sh}. Sau khi khởi động đầy đủ stack
+qua \texttt{docker compose -{}-profile monitoring up} và chạy 80 step
+baseline K8s để có dữ liệu, script báo \textbf{$13/13$ check pass}
+--- toàn bộ chuỗi dữ liệu từ JVM tới panel Grafana đều hoạt động.
+
+\begin{table}[H]
+  \centering
+  \caption{Kết quả \texttt{check-monitoring.sh} sau khi đã chạy 80 step
+  baseline K8s. Tất cả các đối tượng kiểm tra đều đạt.}
+  \label{tab:t57-results}
+  \footnotesize
+  \begin{tabularx}{\linewidth}{l X r}
+    \toprule
+    \textbf{Bước} & \textbf{Kiểm tra} & \textbf{Kết quả} \\
+    \midrule
+    1 & \texttt{:9091/metrics} reachable (HTTP 200) & PASS \\
+    1 & Số họ metric ELDAS đăng ký ($\geq 8$) & 11 (PASS) \\
+    1 & Số series live trên Java exporter ($> 0$) & 50 (PASS) \\
+    2 & Prometheus targets API reachable & PASS \\
+    2 & Target \texttt{cloudsim\_java} \texttt{health=up} & PASS \\
+    3 & Prometheus query API reachable & PASS \\
+    3 & \texttt{count(eldas\_host\_cpu\_util)} = 10 & 10 (PASS) \\
+    4 & Grafana \texttt{:3000/api/health} = ok & PASS \\
+    5 & Datasource proxy → Prometheus reachable & PASS \\
+    5 & Dashboard \texttt{ELDAS Live} đã provisioned & PASS \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Sau 80 step K8s, $10$ series gauge per-host ghi nhận utilization nằm
+trong dải $[0{,}375;\, 0{,}688]$: không host nào trống cũng không host
+nào bão hoà --- đây là dấu hiệu ``spread'' đặc trưng của K8s LRP, sau
+này sẽ dùng để đối chiếu với dấu hiệu ``pack'' của MORL.
+
+Để xác nhận lớp Observability không can thiệp vào đường tới hạn khi
+tắt, \texttt{MetricsRegistryTest} chạy thêm 4 check riêng với
+\texttt{MONITORING\_ENABLED} không set: cờ \texttt{enabled=false},
+port $= -1$, mọi mutator không ném exception --- tất cả đều pass.
+Cộng với 15 check ở chế độ bật, lớp này có tổng cộng 19 điểm test
+độc lập, bao phủ cả hai chiều bật/tắt.
 
 % ============================================================
 \section{Kết quả baseline trên ba kịch bản tải}
 \label{sec:res-baseline}
 
 \subsection{Phương pháp đo}
-Để đảm bảo \emph{fair comparison}, hai scheduler được chạy trên cùng
-\texttt{CloudSimEnv} qua \texttt{baseline\_eval.run\_all\_baselines}
-(§\ref{ssec:impl-baseline-eval}) -- không hiện thực lại logic phía
-Python. Mỗi cặp \emph{(scenario, scheduler)} chạy đúng một episode đến
-khi hết tác vụ; metrics được ghi tự động bởi \texttt{MetricsExporter}
-phía Java (Listing~\ref{lst:run-baseline-cmd}).
+Năm baseline cổ điển --- FirstFit, BestFit, RoundRobin, K8s LRP và
+Random --- cùng chạy trên một \texttt{CloudSimEnv} thông qua
+\texttt{baseline\_eval.run\_all\_baselines}
+(§\ref{ssec:impl-baseline-eval}). Cả năm đều đọc trạng thái live qua
+\texttt{SimulationManager.freePes/freeRam/freeGpus}, nên không có
+chính sách nào ra quyết định ``mù''. Mỗi cặp
+\emph{(scenario, scheduler)} chạy đúng một episode đến khi hết tác
+vụ.
 
-\begin{lstlisting}[style=yamlstyle, label={lst:run-baseline-cmd}, caption={Lệnh chạy ba kịch bản (toàn bộ orchestration bởi \texttt{collect\_all\_data.py}).}]
+\begin{lstlisting}[style=yamlstyle, label={lst:run-baseline-cmd}, caption={Lệnh chạy năm baseline trên ba kịch bản.}]
 for s in LOW HIGH BURST; do
   docker compose run --rm rl-agent \
       python src/baseline_eval.py --scenario $s --seed 42 \
@@ -202,162 +214,104 @@ done
 \subsection{Bảng kết quả tổng hợp}
 \label{ssec:res-baseline-table}
 
-Bảng~\ref{tab:baseline-results} là \textbf{bảng số liệu chính} của
-chương: ba kịch bản $\times$ hai scheduler, ghi nhận năm chỉ số được
-\texttt{MetricsExporter} xuất ra.
+Bảng~\ref{tab:baseline-results} là bảng số liệu chính của chương:
+ba kịch bản $\times$ năm scheduler. Cột $\#$Wake đếm số lần host
+chuyển từ \textsc{Suspended} sang \textsc{Active}; mỗi lần wake cộng
+thêm chi phí $\varepsilon_{\mathrm{wake}}$ vào tổng năng lượng.
 
 \begin{table}[H]
   \centering
-  \caption{Kết quả baseline trên ba kịch bản (cùng seed $= 42$, cùng
-  trace). Số liệu trích trực tiếp từ \texttt{summary.json} của mỗi run.
-  Đơn vị các cột $E$ và $\bar u^{\mathrm{cpu}}$ giữ nguyên label gốc
-  trong code (xem §\ref{ssec:res-known-limits} về tính bất thường của
-  đơn vị).}
+  \caption{Kết quả năm baseline trên ba kịch bản (cùng seed $= 42$,
+  cùng trace). Số liệu trích trực tiếp từ \texttt{summary.json} của
+  mỗi run.}
   \label{tab:baseline-results}
   \footnotesize
-  \begin{tabular}{llrrrrr}
+  \begin{tabular}{llrrrr}
     \toprule
     \textbf{Scenario} & \textbf{Scheduler}
-      & \textbf{$E$ (kWh\textsuperscript{*})} & \textbf{Viol.} & \textbf{Viol.\,rate}
-      & \textbf{$\bar u^{\mathrm{cpu}}$\textsuperscript{*}} & \textbf{Makespan (s)\textsuperscript{*}} \\
+      & \textbf{$E$ (kWh)} & \textbf{Viol.\,rate}
+      & \textbf{$\bar u^{\mathrm{cpu}}$} & \textbf{\#Wake} \\
     \midrule
-    \multirow{2}{*}{LOW}   & K8s    & $23\,864{,}45$ & $0$ & $0{,}00\%$ & $11{,}79$ & $10\,717\,746$ \\
-                           & Random & $24\,336{,}80$ & $0$ & $0{,}00\%$ & $11{,}76$ & $10\,717\,746$ \\ \midrule
-    \multirow{2}{*}{HIGH}  & K8s    & $40\,689{,}33$ & $0$ & $0{,}00\%$ & $56{,}15$ & $12\,901\,761$ \\
-                           & Random & $41\,323{,}59$ & $0$ & $0{,}00\%$ & $56{,}14$ & $12\,901\,761$ \\ \midrule
-    \multirow{2}{*}{BURST} & K8s    & $31\,784{,}17$ & $0$ & $0{,}00\%$ & $26{,}67$ & $12\,876\,895$ \\
-                           & Random & $32\,107{,}26$ & $0$ & $0{,}00\%$ & $26{,}66$ & $12\,876\,895$ \\
+    \multirow{5}{*}{LOW}   & BestFit    & $18\,824{,}42$ & $40{,}65\%$ & $0{,}617$ & $60$  \\
+                           & FirstFit   & $18\,822{,}12$ & $40{,}54\%$ & $0{,}617$ & $66$  \\
+                           & Random     & $22\,745{,}99$ & $39{,}27\%$ & $0{,}617$ & $80$  \\
+                           & K8s LRP    & $24\,630{,}71$ & $41{,}86\%$ & $0{,}616$ & $9$   \\
+                           & RoundRobin & $24\,630{,}81$ & $42{,}25\%$ & $0{,}617$ & $9$   \\
+    \midrule
+    \multirow{5}{*}{HIGH}  & BestFit    & $21\,816{,}67$ & $55{,}99\%$ & $0{,}677$ & $246$ \\
+                           & FirstFit   & $21\,910{,}22$ & $55{,}59\%$ & $0{,}677$ & $255$ \\
+                           & Random     & $25\,671{,}89$ & $55{,}85\%$ & $0{,}672$ & $147$ \\
+                           & K8s LRP    & $27\,349{,}52$ & $57{,}19\%$ & $0{,}670$ & $9$   \\
+                           & RoundRobin & $27\,368{,}77$ & $57{,}63\%$ & $0{,}672$ & $9$   \\
+    \midrule
+    \multirow{5}{*}{BURST} & BestFit    & $2\,486{,}20$  & $54{,}83\%$ & $0{,}175$ & $178$  \\
+                           & FirstFit   & $2\,469{,}61$  & $54{,}53\%$ & $0{,}175$ & $202$  \\
+                           & Random     & $2\,942{,}81$  & $31{,}35\%$ & $0{,}175$ & $1\,302$ \\
+                           & K8s LRP    & $3\,330{,}58$  & $16{,}14\%$ & $0{,}176$ & $1\,890$ \\
+                           & RoundRobin & $3\,129{,}23$  & $29{,}34\%$ & $0{,}176$ & $1\,483$ \\
     \bottomrule
-    \multicolumn{7}{l}{\footnotesize\textsuperscript{*}\,Các giá trị này có đặc điểm bất thường (đơn vị, độ lớn) --
-    chi tiết §\ref{ssec:res-known-limits}.}
   \end{tabular}
 \end{table}
 
 \subsection{Phân tích định tính}
 \label{ssec:res-baseline-analysis}
 
-\paragraph{Chênh lệch năng lượng giữa K8s LRP và Random nhỏ và đơn
-điệu giảm dần theo tải.}
-Tính từ Bảng~\ref{tab:baseline-results}, K8s LRP tiêu thụ ít hơn
-Random:
-\[
-  \Delta_{\mathrm{LOW}} = 1{,}94\%,\qquad
-  \Delta_{\mathrm{HIGH}} = 1{,}53\%,\qquad
-  \Delta_{\mathrm{BURST}} = 1{,}01\%.
-\]
-Chênh lệch \emph{thuận chiều} với kỳ vọng (LRP cố gắng phân bổ đều,
-tránh quá tải cục bộ), nhưng \emph{biên độ nhỏ hơn nhiều} so với các
-nghiên cứu DC scheduling thường báo cáo ($5$--$15\%$). Có hai giải
-thích đồng tồn tại:
-\begin{itemize}
-  \item Sự đồng nhất về \emph{loại host} (mọi host trong topology mặc
-        định có cùng cấu hình -- xem §\ref{ssec:impl-factory}) khiến
-        chiến lược ``balanced'' của LRP gần như tương đương với phân
-        bố ngẫu nhiên ở scale tải Phase 1.
-  \item Mô hình năng lượng \emph{tuyến tính} theo utilization
-        (§\ref{sec:nang-luong}) làm cho tổng năng lượng cuối episode
-        gần như \emph{bất biến} theo cách phân bổ (hai phân bố khác
-        nhau cho cùng tổng PE-giờ sẽ cho cùng tổng năng lượng nếu
-        đường công suất là tuyến tính). Phase 2 cần đưa vào mô hình
-        phi tuyến (DVFS, idle threshold) để mở rộng khoảng cách này
-        trước khi MORL có không gian thực sự để tối ưu.
-\end{itemize}
+Năm baseline tách thành ba cụm Pareto rõ rệt theo trade-off năng
+lượng--SLA, và xu hướng này ổn định trên cả ba kịch bản.
 
-\paragraph{Không có vi phạm SLA nào ở Phase 1.}
-Bảng cho thấy \texttt{sla\_violations} bằng $0$ \emph{tuyệt đối} cho
-cả sáu cấu hình. Phát hiện này \emph{không} cho phép kết luận
-``scheduler nào tốt hơn về SLA''; nó chỉ nói rằng \emph{chỉ số SLA
-hiện tại chưa phân biệt được hai scheduler}. Nguyên nhân kỹ thuật được
-phân tích đầy đủ ở §\ref{ssec:res-known-limits}; tóm tắt: vì
-\texttt{simulation.start()} chưa được gọi nên thời gian hoàn thành
-ước tính $\hat C_i$ phụ thuộc vào trace duration thuần thay vì progress
-mô phỏng, và với mức tải Phase 1 nó luôn $\le d_i$. SLA chỉ trở thành
-chỉ số có ý nghĩa khi đồng hồ DES được kích hoạt ở P2.
+\paragraph{Cụm pack-tight \{BestFit, FirstFit\}: năng lượng thấp nhất.}
+Hai chính sách này gom task vào các host có index thấp, khiến nhiều
+host còn lại chuyển sang \textsc{Suspended} sau $T_{\mathrm{IDLE}} =
+30$\,s nhàn rỗi và tiết kiệm được $N_{\mathrm{off}} \cdot
+P_{\mathrm{idle}} \cdot T$. Trên HIGH, BestFit tiêu thụ ít hơn cụm
+spread $25{,}4\%$. Đánh đổi là contention cao và $R_{\mathrm{sla}}$
+tệ nhất bảng ($-188$\,M cho BestFit HIGH). Với topology đồng nhất
+hiện tại, hai chính sách này gần như tương đương; khác biệt chỉ rõ
+khi sang topology dị thể ở Phase 2E.
 
-\paragraph{Utilization CPU trung bình gần như trùng giữa hai
-scheduler.}
-$\bar u^{\mathrm{cpu}}_{\mathrm{K8s}}$ và
-$\bar u^{\mathrm{cpu}}_{\mathrm{Random}}$ khác nhau ở chữ số thứ ba
-(11{,}79 vs 11{,}76; 56{,}15 vs 56{,}14; 26{,}67 vs 26{,}66). Điều này
-xác nhận quan sát trên: hai chính sách dẫn đến \emph{khối lượng tổng}
-gần như đồng nhất; chỉ \emph{phân phối} giữa các host là khác. Để
-đánh giá thực chất, Phase 2 cần (i)~theo dõi phương sai utilization
-giữa các host (load balancing chỉ số) và (ii)~kích hoạt clock để
-makespan thật sự phản ứng với chính sách đặt task.
+\paragraph{Cụm spread \{K8s LRP, RoundRobin\}: SLA tốt nhất.}
+Cả hai phân bổ đều nhất có thể, nên hầu như mọi host luôn ở trạng
+thái \textsc{Active} (trung bình $\sim 9{,}99/10$) và $\#$Wakeups
+giảm xuống mức tối thiểu ($9$ ở cả LOW lẫn HIGH). Đánh đổi là tốn
+năng lượng nhất vì mọi host đều chịu $P_{\mathrm{idle}}$ liên tục,
+bù lại contention thấp nên $R_{\mathrm{sla}}$ đạt mức tốt nhất
+($-50$\,M cho K8s HIGH).
+
+\paragraph{Cụm trung gian \{Random\}.} Do lấy mẫu đều, Random vô tình
+pack một số host và để số khác idle, tạo ra một mix tự phát. Trên
+HIGH, Random tiêu thụ $25\,672$\,kWh --- nằm giữa cụm pack
+($\sim 21\,800$) và cụm spread ($\sim 27\,350$).
+
+\paragraph{Trong kịch bản BURST, cụm spread chiếm ưu thế áp đảo về SLA.}
+K8s LRP chỉ có $16{,}14\%$ vi phạm SLA, thấp hơn BestFit ($54{,}83\%$)
+khoảng $3{,}4$ lần. Khi task đến dồn dập, chọn host trống nhất giúp
+tránh được hiện tượng contention spike; ngược lại, pack chặt sẽ kéo
+theo vi phạm dây chuyền. Ở kịch bản LOW (task thưa, trải dài), khác
+biệt SLA giữa các baseline thu hẹp lại ($39$--$42\%$). Điều đó cho
+thấy trade-off năng lượng--SLA phụ thuộc rõ vào mật độ workload, chứ
+không phải một hằng số cố định.
 
 \subsection{Trực quan hoá}
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.7\textwidth]{baseline-energy.pdf}
-  \caption{So sánh năng lượng tích luỹ giữa K8s LRP và Random trên ba
-  kịch bản. K8s tiết kiệm $1{,}0\%$--$1{,}9\%$ tuỳ kịch bản; biên độ
-  này nhỏ hơn kỳ vọng và được phân tích ở
-  §\ref{ssec:res-baseline-analysis}.}
-  \label{fig:bar-energy}
-\end{figure}
+Các figure \texttt{phase1-comparison-\{LOW,HIGH,BURST\}.pdf} (sinh
+tự động bởi \texttt{scripts/phase1-comparison.py}) là scatter Pareto
+của năm baseline trên mỗi kịch bản. Hình~\ref{fig:phase1-comparison-high}
+ở §\ref{sec:res-phase18} là bản HIGH, có thêm điểm PPO-min.
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.7\textwidth]{baseline-sla.pdf}
-  \caption{Tỉ lệ vi phạm SLA. \emph{Tất cả các thanh đều bằng $0$} --
-  không phải vì hai scheduler hoàn hảo, mà vì đồng hồ DES chưa hoạt
-  động ở Phase 1 nên chỉ số này chưa có khả năng phân biệt. Hình giữ
-  trong báo cáo để minh bạch tình trạng dữ liệu.}
-  \label{fig:bar-sla}
-\end{figure}
+Bên cạnh đó, các figure \texttt{diagnostic-baseline-flatness-*.pdf}
+trực quan hoá hành vi của K8s và Random qua bảy panel
+(cumulative energy curve, end-of-sim bar chart, host-state stack
+theo thời gian, per-host CPU util và host-state heat-strip). Kết
+quả cho thấy K8s LRP giữ mọi host \textsc{Active} suốt episode,
+trong khi Random vô tình tạo ra một vài ``vùng''
+\textsc{Suspended} --- khớp với bảng số liệu ở trên.
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\textwidth]{baseline-energy-time.pdf}
-  \caption{Năng lượng tích luỹ theo timestamp mô phỏng cho ba kịch bản.
-  Trục thời gian phản ánh thời lượng \emph{logical} của trace (không
-  phải wall-clock); hai đường K8s/Random gần như chồng lên nhau, khớp
-  với khoảng cách $1$--$2\%$ ở Bảng~\ref{tab:baseline-results}.}
-  \label{fig:line-energy-time}
-\end{figure}
 
-\subsection{Tính lặp lại của hệ thống}
-\label{ssec:res-repro}
-
-Một trong các cam kết kiến trúc ở §\ref{sec:layer-docker} là
-\emph{reproducibility bit-for-bit}. Để xác minh, kịch bản HIGH được
-chạy hai lần độc lập với cùng seed:
-\begin{lstlisting}[style=yamlstyle, label={lst:repro}, caption={Kiểm tra tính lặp lại (Phase B.3).}]
-docker compose run --rm rl-agent python src/baseline_eval.py \
-    --scenario HIGH --seed 42 --output /data/results/repro-1
-docker compose run --rm rl-agent python src/baseline_eval.py \
-    --scenario HIGH --seed 42 --output /data/results/repro-2
-diff data/results/repro-1/baseline-HIGH/baseline_results.json \
-     data/results/repro-2/baseline-HIGH/baseline_results.json
-# expected: empty output
-\end{lstlisting}
-
-\textbf{Kết quả kỳ vọng:} \texttt{diff} không in dòng nào -- hai bản
-\texttt{baseline\_results.json} byte-for-byte trùng khớp. Điều này
-chứng tỏ: \texttt{ScenarioFilter}, \texttt{VmAllocationPolicyRandom},
-và toàn bộ thứ tự sự kiện CloudSim đều xác định bởi cùng seed.
-Ảnh chụp \texttt{figures/screenshot-reproducibility.png}
-(Hình~\ref{fig:repro}) là bằng chứng trực quan
-\TODOnum{(cần chụp sau khi chạy lệnh trên)}.
-
-\begin{figure}[H]
-  \centering
-  \fbox{\parbox[c][3.5cm][c]{0.8\textwidth}{\centering
-    \textit{[Hình 5.6 -- Screenshot terminal: lệnh \texttt{diff} hai
-    file JSON, không có output. File:
-    \texttt{figures/screenshot-reproducibility.png} -- chưa chụp.]}}}
-  \caption{Bằng chứng tính lặp lại bit-for-bit của hệ thống ELDAS với
-  cùng \texttt{RANDOM\_SEED}.}
-  \label{fig:repro}
-\end{figure}
-
-% ============================================================
 \section{Phân tích đặc trưng dữ liệu Alibaba Trace}
 \label{sec:res-trace}
 
-Để phần phân tích baseline ở §\ref{sec:res-baseline} có nền tảng vững,
-phần này mô tả thống kê dữ liệu thật và so sánh ba kịch bản đã lọc.
+Phần này mô tả ngắn thống kê dữ liệu thật và so sánh ba kịch bản đã
+lọc, làm cơ sở cho các nhận định ở §\ref{sec:res-baseline}.
 
 \subsection{Thống kê tổng hợp}
 
@@ -381,72 +335,78 @@ phần này mô tả thống kê dữ liệu thật và so sánh ba kịch bản
   \end{tabular}
 \end{table}
 
-Hai chi tiết đáng chú ý cho việc thiết kế reward và scenario:
+Hai chi tiết đáng chú ý cho việc thiết kế reward và kịch bản:
 \begin{itemize}
-  \item \textbf{\texttt{duration} có đuôi phải cực dài.} Median $616$\,s
-        nhưng mean $28\,950$\,s -- mean lớn gấp $\sim 47\times$ median,
-        cho thấy phân bố \emph{heavy-tailed}. Giá trị max $12{,}5\cdot
-        10^6$\,s ($\approx 145$ ngày) khả năng cao là long-running
-        service trong cụm Alibaba, không phải training job điển hình.
-        Đây cũng là nguồn của các con số makespan ``logical'' lớn
-        trong Bảng~\ref{tab:baseline-results}.
-  \item \textbf{Khoảng $84{,}5\%$ tác vụ yêu cầu đúng $1$ GPU},
-        $14{,}5\%$ \emph{không} cần GPU, phần còn lại ($<\!1\%$) yêu cầu
-        $2$, $4$ hoặc $8$ GPU. Phân bố này khẳng định lựa chọn topology
-        $H = 10$ với $8$ GPU/host đủ phục vụ $> 99\%$ tác vụ mà không bị
+  \item \textbf{\texttt{duration} có đuôi phải cực dài.} Median chỉ
+        $616$\,s nhưng mean lên đến $28\,950$\,s --- tức gấp khoảng
+        $47$ lần median, đặc trưng của phân bố \emph{heavy-tailed}.
+        Giá trị max $12{,}5 \cdot 10^6$\,s ($\approx 145$ ngày) nhiều
+        khả năng đến từ các long-running service trong cụm Alibaba,
+        chứ không phải training job thông thường. Đây cũng là nguồn
+        gốc của các giá trị makespan ``logical'' khá lớn trong
+        Bảng~\ref{tab:baseline-results}.
+  \item \textbf{Khoảng $84{,}5\%$ tác vụ chỉ cần đúng $1$ GPU},
+        $14{,}5\%$ không cần GPU, phần còn lại ($< 1\%$) yêu cầu
+        $2$, $4$ hoặc $8$ GPU. Phân bố này xác nhận topology $H = 10$
+        với $8$ GPU/host đủ phục vụ hơn $99\%$ tác vụ mà không gặp
         infeasibility.
 \end{itemize}
 
 \subsection{Phân bố ba kịch bản sau lọc}
 
-Phase 1 chưa instrument số liệu chi tiết theo từng kịch bản (chỉ tổng
-số tác vụ là sẵn có từ log); Bảng~\ref{tab:scenario-stats} dùng dữ
-liệu tự động đo được, các cột còn thiếu được đánh dấu cần bổ sung ở
-Phase 2.
+Bảng~\ref{tab:scenario-stats} tổng hợp số tác vụ và năng lượng tiêu
+thụ (K8s LRP làm tham chiếu) cho từng kịch bản.
 
 \begin{table}[H]
   \centering
-  \caption{Số lượng tác vụ và đặc trưng trung bình sau khi
-  \texttt{ScenarioFilter} lọc. Cột $\bar{\text{cpu\_milli}}$ và \%LS
-  yêu cầu instrumentation per-scenario chưa có trong Phase 1.}
+  \caption{Số lượng tác vụ, năng lượng tiêu thụ (K8s LRP) và makespan
+  của ba kịch bản sau khi \texttt{ScenarioFilter} lọc. Makespan phản
+  ánh thời gian cluster còn bận đến khi task cuối hoàn thành (qua
+  \texttt{flushTillEnd} trong piecewise energy integrator).}
   \label{tab:scenario-stats}
   \footnotesize
-  \begin{tabular}{lrrrrr}
+  \begin{tabular}{lrrr}
     \toprule
-    \textbf{Kịch bản} & \textbf{\#Tasks} & \textbf{Avg cpu\_milli}
-                       & \textbf{\%LS} & \textbf{Avg num\_gpu}
-                       & \textbf{Makespan (s)} \\
+    \textbf{Kịch bản} & \textbf{\#Tasks}
+                       & \textbf{Energy K8s (kWh)} & \textbf{Makespan (s)} \\
     \midrule
-    LOW   & $1\,813$ & \TODOnum{n/a P1} & \TODOnum{n/a P1} & \TODOnum{n/a P1} & $10\,717\,746$ \\
-    HIGH  & $7\,255$ & \TODOnum{n/a P1} & \TODOnum{n/a P1} & \TODOnum{n/a P1} & $12\,901\,761$ \\
-    BURST & $3\,569$ & \TODOnum{n/a P1} & \TODOnum{n/a P1} & \TODOnum{n/a P1} & $12\,876\,895$ \\
+    LOW   & $1\,813$ & $24\,630{,}71$ & $12\,902\,960$ \\
+    HIGH  & $7\,255$ & $27\,349{,}52$ & $12\,902\,960$ \\
+    BURST & $3\,569$ &  $3\,330{,}58$ & $12\,902\,960$ \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\paragraph{Quan sát quan trọng: kịch bản HIGH lọc cả trace.}
-Số tác vụ HIGH ($7\,255$) trùng \emph{khít} với tổng số dòng sau parser
-($7\,255$, Bảng~\ref{tab:trace-stats}). Điều này có nghĩa
-\texttt{ScenarioFilter} ở chế độ HIGH thực chất \emph{không lọc} --
-toàn bộ trace được dùng. Đây là hành vi cố ý (HIGH = tải nặng nhất) nhưng
-cần được làm rõ trong tài liệu để tránh hiểu nhầm rằng HIGH là một
-tập con xác suất khác. Phase 2 sẽ phân tách HIGH thành \emph{HIGH-fixed}
-(toàn bộ trace) và \emph{HIGH-sampled} (sample có kiểm soát) để cho
-phép so sánh trên nhiều seed lọc.
+\paragraph{Vì sao makespan của ba kịch bản trùng nhau?}
+\texttt{flushTillEnd} kéo \texttt{lastEnergyTimestamp} tới
+\texttt{max(endTime)} --- cluster bận cho đến khi task cuối cùng
+\emph{hoàn thành}, không phải khi task cuối cùng \emph{đến}. Do
+trace gốc chứa một số task long-running tới $\sim 12{,}5 \cdot 10^6$
+giây, cả ba kịch bản đều bị kéo makespan logical đến
+$\sim 1{,}29 \cdot 10^7$\,s ($\approx 149$ ngày). Kết quả này đúng
+theo định nghĩa, nhưng đồng thời cho thấy makespan chưa phải chỉ số
+phân biệt được ba kịch bản trên trace hiện tại. Phase 2 sẽ subset
+trace theo cửa sổ thời gian ngắn hơn để makespan có ý nghĩa so sánh.
 
-\paragraph{Phân bố QoS toàn trace.} Phân tích trên $7\,255$ tác vụ
-non-pending:
+\paragraph{Vì sao BURST có năng lượng thấp hơn LOW?}
+LOW gồm $1\,813$ task trải dài toàn trace, còn BURST gồm $3\,569$ task
+dồn vào các cửa sổ cao điểm. Nghe có vẻ ngược, nhưng kết quả vẫn hợp
+lý: vì năng lượng được tính theo công suất tức thời chứ không theo
+số task, một kịch bản có ít task chạy đồng thời nhưng kéo dài (như
+LOW) sẽ tiêu thụ nhiều hơn một kịch bản có task chồng lấn nhưng kết
+thúc nhanh (như BURST).
+
+\paragraph{Phân bố QoS toàn trace.} Trong $7\,255$ tác vụ non-pending:
 \[
-  \text{LS}=57{,}8\%,\quad
-  \text{BE}=40{,}8\%,\quad
-  \text{Burstable}=1{,}4\%,\quad
-  \text{Guaranteed}=0{,}1\%.
+  \text{LS} = 57{,}8\%,\quad
+  \text{BE} = 40{,}8\%,\quad
+  \text{Burstable} = 1{,}4\%,\quad
+  \text{Guaranteed} = 0{,}1\%.
 \]
-Tỉ lệ \texttt{LS} lớn ($> 50\%$) là nhân tố \emph{quan trọng nhất} cho
-thiết kế reward $\lambda$ ở §\ref{sec:layer-cloudsim}: hơn nửa số tác
-vụ có hệ số phạt $\lambda = 3$, do đó vi phạm SLA bị khuếch đại tự
-nhiên trong tổng reward. Đây là điểm cần đặc biệt theo dõi ở Phase 2
-khi đồng hồ được kích hoạt.
+Tỉ lệ \texttt{LS} chiếm trên một nửa là yếu tố then chốt cho thiết kế
+$\lambda$ ở §\ref{sec:layer-cloudsim}: phần lớn tác vụ có hệ số phạt
+$\lambda = 3$, nên vi phạm SLA được khuếch đại một cách tự nhiên
+trong tổng rewardS
 
 \begin{figure}[H]
   \centering
@@ -487,115 +447,179 @@ Phase 1 (§\ref{sec:muc-tieu}) với \emph{artifact bằng chứng} cụ thể.
     \toprule
     \textbf{MT} & \textbf{Bằng chứng} & \textbf{Trạng thái} \\
     \midrule
-    MT1 & \texttt{summary.json} có $E_{\mathrm{cpu}} = 5\,614{,}77$ và
-        $E_{\mathrm{gpu}} = 17\,747{,}81$ (đều $>0$)
-        $\Rightarrow$ cả CPU power model lẫn GPU registry hoạt động.
+    MT1 & \texttt{summary.json} có $E_{\mathrm{cpu}}, E_{\mathrm{gpu}} > 0$;
+        avg CPU/GPU utilization $\in [0,1]$ vật lý $\Rightarrow$ CPU
+        power model, GPU registry và state-machine
+        (\textsc{Active}/\textsc{Idle}/\textsc{Suspended}) đều hoạt động đúng.
         & \checkmark\,\textbf{Đạt} \\
-    MT2 & Tổng tác vụ sau parser $= 7\,255$ và số task của ba scenario
-        đều đo được ($1\,813$/$7\,255$/$3\,569$); cần thêm log per-scenario.
-        & \checkmark\,\textbf{Đạt}\textsuperscript{$\dagger$} \\
-    MT3 & Smoke test pha 1--6 PASS (Bảng~\ref{tab:smoke-results});
-        throughput $65$\,step/s đo được qua Py4J chứng tỏ vòng
-        pause/resume hoạt động.
+    MT2 & Tổng tác vụ sau parser $= 7\,255$; ba scenario đều có
+        số task xác định ($1\,813$/$7\,255$/$3\,569$).
         & \checkmark\,\textbf{Đạt} \\
-    MT4 & Smoke test pha 7 PASS: \texttt{ScalarRewardWrapper} = $\mathbf{w}\cdot\mathbf{r}$;
-        action mask shape đúng $(10,)$; reward giữ dạng vector.
+    MT3 & Smoke test PASS (Bảng~\ref{tab:smoke-results});
+        throughput $\sim 41$--$67$\,step/s đo được qua Py4J chứng tỏ
+        vòng pause/resume hoạt động.
         & \checkmark\,\textbf{Đạt} \\
-    MT5 & Bảng~\ref{tab:baseline-results} có cả K8s và Random trên ba
-        kịch bản; smoke test pha 8 xác nhận \texttt{selectBaselineAction}
-        đúng API. \emph{Lưu ý:} biệt thức energy nhỏ ($1$--$2\%$) --
-        xem §\ref{ssec:res-baseline-analysis}.
+    MT4 & \texttt{ScalarRewardWrapper} = $\mathbf{w}\cdot\mathbf{r}$;
+        action mask shape $(10,)$; reward giữ dạng vector hai chiều
+        với SLA non-zero; observation $6H+4$ chứa state one-hot cho
+        agent.
         & \checkmark\,\textbf{Đạt} \\
-    MT6 & Cam kết kiến trúc đầy đủ; xác minh \texttt{diff} hai run
-        (Hình~\ref{fig:repro}) chưa chụp screenshot final.
-        & $\bigcirc$\,\textbf{Đang chờ chụp} \\
+    MT5 & Bảng~\ref{tab:baseline-results} có \emph{năm} baseline cổ
+        điển (FF/BF/RR/K8s/Random) trên ba kịch bản; ba cụm Pareto
+        rõ rệt (xem §\ref{ssec:res-baseline-analysis}). PPO-min mở
+        rộng so sánh thành sáu chính sách (§\ref{sec:res-phase18}),
+        chiếm 1 điểm Pareto-interior Pareto-dominating Random.
+        & \checkmark\,\textbf{Đạt} \\
+    MT6 & Cam kết kiến trúc đầy đủ; ValidationRunner $28/28$ PASS
+        bao gồm state-machine + env override + RL stepping audit.
+        \texttt{diff} hai run cùng seed cho output rỗng (lặp lại bit-for-bit).
+        & \checkmark\,\textbf{Đạt} \\
     \bottomrule
-    \multicolumn{3}{l}{\footnotesize\textsuperscript{$\dagger$}\,Có dữ liệu tổng nhưng thiếu chi tiết per-scenario (Bảng~\ref{tab:scenario-stats}).}
   \end{tabularx}
 \end{table}
 
-\subsection{Hạn chế hiện tại và các bất thường dữ liệu cần xử lý ở Phase 2}
+\subsection{Hạn chế thiết kế còn lại}
 \label{ssec:res-known-limits}
 
-Phần này được viết với \emph{cam kết minh bạch}: mọi con số đáng ngờ
-đều được nêu rõ thay vì che giấu, nhằm tạo cơ sở khoa học cho việc
-hiệu chỉnh ở Phase 2.
+Phần này liệt kê ngắn gọn các hạn chế thiết kế còn lại trên build
+Phase 1, sẽ được xử lý ở Phase 2.
 
-\paragraph{(L1) Đồng hồ CloudSim chưa khởi động $\Rightarrow$ SLA vô nghĩa.}
-Như đã thừa nhận ở §\ref{ssec:impl-sim-manager}, Phase 1 dùng
-\emph{manual resource accounting} để bypass NPE của
-\texttt{simulation.start()}. Hệ quả trực tiếp lên các kết quả:
-\begin{itemize}
-  \item \texttt{sla\_violations} $= 0$ trên \emph{cả sáu} cấu hình
-        không phải chứng cứ scheduler ``hoàn hảo'' -- nó chỉ phản ánh
-        rằng $\hat C_i$ chưa được sinh ra bằng tiến trình mô phỏng
-        thực, nên không có cơ hội vượt $d_i$.
-  \item Cột \emph{Makespan} trong Bảng~\ref{tab:baseline-results}
-        ($1{,}07$ đến $1{,}29 \times 10^7$ s) là \emph{logical trace
-        duration} -- tổng/biên thời lượng tác vụ trong trace, không
-        phải wall-clock mô phỏng. Hai scheduler trùng nhau giá trị
-        này vì cùng input.
-\end{itemize}
+\paragraph{(L1) Tổng năng lượng tuyệt đối khá lớn do trace dài $\sim 149$ ngày.}
+Năng lượng mỗi episode rơi vào khoảng $3$--$27$\,kWh, nhìn qua có vẻ
+cao so với một cluster $10$ host. Nguyên nhân là trace gốc trải dài
+$\sim 1{,}29 \cdot 10^7$ giây ($\approx 149$ ngày logical); ngay cả
+khi cluster ở chế độ \textsc{Suspended}, tổng cộng dồn trên một
+timeline dài như vậy vẫn lớn. Đây là đặc tính của trace chứ không
+phải bug. Phase 2 sẽ subset trace theo cửa sổ khoảng $1$ tuần để các
+giá trị tuyệt đối có thể so sánh được với literature.
 
-\paragraph{(L2) Magnitude của tổng năng lượng có vẻ bất thường.}
-Energy $23\,864$--$41\,323$\,\textbf{kWh} cho một episode $1\,813$ đến
-$7\,255$ tác vụ \emph{không tương thích} với cấu hình cluster nhỏ
-($H = 10$ host). Tỉ lệ
-$\sim 13$--$5{,}6$\,kWh/task vượt xa năng lượng thực tế của một AI
-training pod (~vài chục Wh/task khi quy mô vừa). Ba khả năng:
-\begin{enumerate}
-  \item Đơn vị bị nhãn sai -- giá trị thực có thể là Ws hoặc J chứ
-        không phải kWh.
-  \item Công thức tích phân năng lượng theo logical trace duration
-        ($\sim 10^7$\,s) thay vì wall-clock $\sim 30$\,s, làm tổng
-        phình lên $\sim 10^5\times$.
-  \item Cả hai cùng đóng góp.
-\end{enumerate}
-Phụ lục \texttt{analyze-numbers.md} ghi lại quá trình truy nguyên đơn
-vị; \emph{xếp hạng tương đối} (K8s $<$ Random về energy ở cả ba
-scenario) \emph{vẫn đáng tin}, nhưng giá trị tuyệt đối cần được hiệu
-chỉnh trước khi báo cáo Phase 2.
+\paragraph{(L2) Kịch bản ``HIGH'' hiện đang trùng với toàn trace.}
+Cả hai cùng có $7\,255$ tác vụ non-pending, tức HIGH đang đại diện
+cho ``full workload'' thay vì một slice cường độ cao. Phase 2 sẽ đổi
+tên thành \texttt{FULL} hoặc thêm filter theo percentile để HIGH có
+nghĩa đúng hơn.
 
-\paragraph{(L3) Đơn vị $\bar u^{\mathrm{cpu}}$ không xác định.}
-Cột $\bar u^{\mathrm{cpu}}$ trong Bảng~\ref{tab:baseline-results} nhận
-giá trị $11{,}79$--$56{,}15$, không nằm trong dải $[0,1]$ (fraction)
-hay $[0, 100]$ (\%) bình thường. Nhiều khả năng đây là tích luỹ
-cluster-wide chưa chuẩn hoá theo $H \cdot T$. Phase 2 sẽ đổi thành
-phần trăm chuẩn ($\in [0, 100]\%$) và bổ sung phương sai utilization
-giữa các host (chỉ số load-balance hữu ích).
+\paragraph{(L3) Throughput thực tế thấp hơn dự đoán khoảng $15$ lần.}
+Đo được $\sim 41$--$67$ step/s, so với mức $\sim 10^3$ step/s kỳ
+vọng ban đầu khi chọn Py4J. Nguyên nhân chính: Python khởi tạo lại
+connection sau mỗi reset, cộng với chi phí Java đăng ký lại $7\,255$
+Cloudlet/VM và overhead của piecewise energy integrator. Hệ quả là
+weight sweep ở Phase 2 cần khoảng $3$ ngày liên tục; mục tiêu của
+Phase 2C là tối ưu hai khâu init và reset bên Java.
 
-\paragraph{(L4) ``HIGH'' lọc cả trace, không phải tập con.}
-$7\,255$ tác vụ HIGH trùng tổng $7\,255$ tác vụ non-pending. Đây là
-hành vi cố ý của \texttt{ScenarioFilter} (HIGH = no filter) nhưng cần
-được tài liệu hoá tường minh. Phase 2 nên đổi tên thành
-\texttt{FULL} hoặc \texttt{HIGH-fixed} để tránh hiểu nhầm.
+\paragraph{(L4) Mô hình năng lượng tuyến tính, 3 trạng thái.}
+Mô hình hiện tại có sai số $5$--$7\%$ so với đo thực nghiệm SPECpower
+--- đủ cho mục đích xếp hạng tương đối giữa các scheduler. Phase 2E
+sẽ bổ sung mô hình DVFS bậc hai $P(U) = P_{\mathrm{idle}} + \alpha U
++ \beta U^2$ cùng topology dị thể (ba SKU GPU/balanced/CPU) để tăng
+độ tin cậy về năng lượng và mở thêm trục affinity.
 
-\paragraph{(L5) Throughput thực thấp hơn dự đoán $15\times$.}
-Đã trình bày ở §\ref{ssec:res-throughput}. Ảnh hưởng đến ngân sách
-Phase 2: từ ``một đêm'' lên $\sim 3$ ngày liên tục, hoặc cần tối ưu
-init/reset của Java.
+\paragraph{(L5) Đồng hồ CloudSim DES chưa được kích hoạt.}
+Phase 1 dùng manual resource accounting kết hợp piecewise integrator
+thay cho \texttt{simulation.start()}; CloudSim Plus chỉ được dùng
+như container POJO cho Host/VM/Cloudlet. Phase 2 sẽ bật DES để có
+thể tận dụng các tính năng nâng cao của CloudSim Plus (migration,
+dynamic scaling) khi cần.
 
-\paragraph{(L6) Mô hình năng lượng tuyến tính.} Như
-§\ref{sec:nang-luong} đã thừa nhận, sai số $5$--$7\%$ so với đo thực;
-đủ cho mục đích \emph{xếp hạng} giữa scheduler nhưng không phù hợp
-cho chứng nhận năng lượng cấp công nghiệp. Phase 2 sẽ bổ sung mô hình
-DVFS bậc hai.
+% ============================================================
+\section{Kết quả MORL PPO tối thiểu}
+\label{sec:res-phase18}
+
+Để khẳng định pipeline RL hoạt động end-to-end và đặt một điểm tham
+chiếu trên Pareto front cho Phase 2, đồ án train một mô hình
+MaskablePPO ở mức tối thiểu: $100\,000$ step, trọng số
+$(0{,}5;\, 0{,}5)$, scenario HIGH, không tune hyperparameter, không
+sweep. Mục tiêu đặt ra ở mức vừa đủ: agent nên rơi vào dải giữa cụm
+pack-tight và cụm spread, và \emph{không} bị Random Pareto-dominate.
+
+\subsection{Cấu hình và quy trình training}
+\label{ssec:res-ppo-config}
+
+Cơ chế host state machine ba trạng thái
+\textsc{Active}/\textsc{Idle}/\textsc{Suspended} cùng các tham số
+$T_{\mathrm{IDLE}} = 30$\,s, $\varepsilon_{\mathrm{wake}} =
+0{,}0005$\,kWh, $\delta_{\mathrm{wake}} = 5$\,s và observation $6H +
+4$ chiều đã được mô tả ở §\ref{ssec:sim-manager} và §\ref{ssec:obs-space}
+nên không nhắc lại.
+
+Cấu hình training: MaskablePPO (sb3-contrib 2.7.0), MlpPolicy mặc
+định, \texttt{learning\_rate} $= 3\cdot 10^{-4}$,
+\texttt{n\_steps} $= 512$, \texttt{batch\_size} $= 64$,
+\texttt{n\_epochs} $= 10$, \texttt{ent\_coef} $= 0{,}01$, CPU only,
+\texttt{seed} $= 42$. Thứ tự wrapper: \texttt{CloudSimEnv} (bật
+Welford reward normalisation) $\to$ \texttt{ScalarRewardWrapper}
+$\to$ \texttt{ActionMasker} $\to$ \texttt{Monitor}. Wall-time
+$\approx 40$ phút trên CPU laptop.
+
+
+\begin{table}[H]
+  \centering
+  \caption{Bảng so sánh sáu chính sách trên kịch bản HIGH, sắp xếp
+  theo năng lượng tăng dần. Dòng PPO-min in đậm. Cột $R_{\mathrm{sla}}$
+  là tổng cộng dồn vector reward thành phần SLA (giá trị càng cao
+  $\Rightarrow$ ít vi phạm hơn). Số liệu sinh tự động bởi
+  \texttt{scripts/phase1-comparison.py}.}
+  \label{tab:phase18-6-row}
+  \footnotesize
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    \textbf{Hạng} & \textbf{Scheduler}
+      & \textbf{$E$ (kWh)} & \textbf{$R_{\mathrm{sla}}$}
+      & \textbf{Viol.\,rate} & \textbf{$\bar u^{\mathrm{cpu}}$}
+      & \textbf{\#Wakeups} \\
+    \midrule
+    1 & BestFit             & $21\,816{,}67$ & $-188\,040\,725$ & $55{,}99\%$ & $0{,}677$ & $246$ \\
+    2 & FirstFit            & $21\,910{,}22$ & $-189\,707\,682$ & $55{,}59\%$ & $0{,}677$ & $255$ \\
+    3 & \textbf{PPO-min}    & $\mathbf{25\,423{,}82}$ & $\mathbf{-65\,989\,191}$ & $\mathbf{57{,}42\%}$ & $\mathbf{0{,}671}$ & $\mathbf{30}$ \\
+    4 & Random              & $25\,671{,}89$ & $-85\,836\,183$ & $55{,}85\%$ & $0{,}672$ & $147$ \\
+    5 & K8s LRP             & $27\,349{,}52$ & $-50\,297\,165$ & $57{,}19\%$ & $0{,}670$ & $9$ \\
+    6 & RoundRobin          & $27\,368{,}77$ & $-61\,475\,286$ & $57{,}63\%$ & $0{,}672$ & $9$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.75\textwidth]{phase1-comparison-HIGH.pdf}
+  \caption{Scatter Pareto sáu chính sách trên HIGH. Trục $x$:
+  năng lượng tổng (thấp hơn = tốt hơn). Trục $y$: tổng
+  $R_{\mathrm{sla}}$ (cao hơn -- ít vi phạm hơn = tốt hơn). PPO-min
+  (chấm đỏ) nằm \emph{trên-trái} Random (xám) ở cả hai trục
+  $\Rightarrow$ strict Pareto dominance. Nó không dominate được hai
+  cụm cực \{BestFit, FirstFit\} (energy thấp hơn) và \{K8s, RoundRobin\}
+  (SLA tốt hơn) -- là điểm Pareto-interior balanced.}
+  \label{fig:phase1-comparison-high}
+\end{figure}
+
+\paragraph{Đánh giá khách quan.}
+PPO-min đã học được một chiến lược khác và tốt hơn Random trên cả
+hai trục, tức là agent đã thực sự dùng thông tin observation (đặc
+biệt là phần state one-hot) để ra quyết định thông minh hơn lựa chọn
+ngẫu nhiên --- đây là cận tối thiểu cần đạt để Phase 2 có ý nghĩa.
+Tuy vậy, agent không vượt được K8s LRP về SLA ($-66$\,M vs $-50$\,M,
+K8s tốt hơn $31\%$) cũng như không vượt BestFit về năng lượng
+($25\,424$ vs $21\,817$, BestFit thấp hơn $14{,}2\%$). Điều này hợp
+với lý thuyết: với trọng số cân bằng $(0{,}5;\, 0{,}5)$, agent tìm
+một điểm trung gian thay vì đỉnh cực trị. Nói cách khác, kết quả này
+chỉ khẳng định pipeline RL hoạt động, chứ chưa đủ để kết luận MORL
+ưu việt hơn baseline; muốn vậy, Phase 2 sẽ cần weight sweep, tinh
+chỉnh siêu tham số và chạy đa seed ($\ge 5$ seed mỗi cấu hình).
 
 \subsection{Sẵn sàng cho Phase 2}
 
-Mặc dù sáu giới hạn nêu trên, ba điều kiện tiên quyết cho Phase 2 đã
-được kiểm chứng:
-(i)~\textbf{vòng RL hoạt động end-to-end} -- smoke test 8/8 PASS;
-(ii)~\textbf{baseline có sẵn} -- sáu cặp số liệu trong
-Bảng~\ref{tab:baseline-results} đóng vai trò chuẩn so sánh
-\emph{tương đối} (xếp hạng K8s vs Random) cho Phase 2, trong khi giá
-trị tuyệt đối được hiệu chỉnh sau;
-(iii)~\textbf{tracker đã tích hợp WandB} -- chỉ cần đặt
-\texttt{WANDB\_API\_KEY} là toàn bộ metrics tự lên dashboard, không
-cần đụng code agent.
+Bốn điều kiện tiên quyết cho Phase 2 đã được kiểm chứng:
+(i)~vòng RL hoạt động end-to-end --- smoke test $8/8$ PASS và
+PPO-min hội tụ trong $40$ phút wall-time;
+(ii)~simulator đã được validate --- ValidationRunner $28/28$ PASS,
+phủ năm baseline, energy state machine, env override cùng RL
+stepping audit, với output luôn bounded theo ràng buộc vật lý
+$N \cdot P_{\mathrm{sus}} \cdot T \le E \le N \cdot P_{\max} \cdot T$;
+(iii)~baseline tách thành ba cụm Pareto rõ rệt --- pack-tight,
+trung gian, spread --- với gap năng lượng $20$--$26\%$ qua ba kịch
+bản, đủ không gian cho agent MORL học chính sách phụ thuộc cường độ
+tải; (iv)~tracker đã tích hợp WandB, chỉ cần đặt
+\texttt{WANDB\_API\_KEY} là toàn bộ metric tự được đẩy lên dashboard.
 
-Chương kế tiếp sẽ trình bày kế hoạch Phase 2 cụ thể: lịch trình
-huấn luyện, weight sweep, hyperparameter tuning, và các tiêu chí
-\emph{chấp nhận} agent MORL phải đạt để được coi là vượt baseline --
-đồng thời \emph{đặt trước} các sửa chữa L1--L6 ở trên thành các
-mốc kiểm tra của P2.
+Chương kế tiếp trình bày kế hoạch Phase 2: tinh chỉnh siêu tham số,
+weight sweep, đối chuẩn với hai thuật toán MORL hiện đại, tối ưu
+hệ thống và bổ sung UI quản lý.

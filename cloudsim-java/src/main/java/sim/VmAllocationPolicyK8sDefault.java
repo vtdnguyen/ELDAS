@@ -5,7 +5,6 @@ import org.cloudsimplus.hosts.Host;
 import org.cloudsimplus.vms.Vm;
 
 import sim.AlibabaTraceReader.TaskRecord;
-import sim.DatacenterFactory.GpuState;
 
 import java.util.*;
 
@@ -25,22 +24,23 @@ import java.util.*;
  *       Ties are broken by lowest index for determinism.</li>
  * </ol>
  *
- * <p>Two entry points:
- * <ol>
- *   <li>{@link #defaultFindHostForVm(Vm)} — CloudSim internal path</li>
- *   <li>{@link #selectHostForTask(List, TaskRecord)} — baseline evaluation
- *       path, GPU-aware, returns a 0-based host index</li>
- * </ol>
+ * <p><b>Why it takes a {@link SimulationManager} reference.</b> CloudSim's
+ * {@code Host.getFreePesNumber()} / {@code getRam().getAvailableResource()}
+ * always report full capacity because we never submit Vms (manual
+ * allocation only — see java-validation-report §B1). Reading those would
+ * make every host score 1.0 ⇒ tie-break picks index 0 every time. This
+ * class therefore queries live state via {@link SimulationManager#freePes},
+ * {@link SimulationManager#freeRam}, {@link SimulationManager#canHost}.
  */
 public class VmAllocationPolicyK8sDefault extends VmAllocationPolicyAbstract {
 
-    private final Map<Host, GpuState> gpuRegistry;
+    private final SimulationManager mgr;
 
-    public VmAllocationPolicyK8sDefault(Map<Host, GpuState> gpuRegistry) {
-        this.gpuRegistry = gpuRegistry;
+    public VmAllocationPolicyK8sDefault(SimulationManager mgr) {
+        this.mgr = mgr;
     }
 
-    // ── CloudSim integration ──────────────────────────────────────────────
+    // ── CloudSim integration (unused while DES is not started — see §B8) ──
 
     @Override
     protected Optional<Host> defaultFindHostForVm(Vm vm) {
@@ -49,29 +49,21 @@ public class VmAllocationPolicyK8sDefault extends VmAllocationPolicyAbstract {
 
         for (Host host : getHostList()) {
             if (!host.isSuitableForVm(vm)) continue;
-
-            double score = leastRequestedScore(host);
+            double score = leastRequestedScoreFromCloudSim(host);
             if (score > bestScore) {
                 bestScore = score;
                 best = host;
             }
         }
-
         return Optional.ofNullable(best);
     }
 
-    // ── Baseline evaluation API ───────────────────────────────────────────
+    // ── Baseline evaluation API (the only path actually exercised) ────────
 
     /**
      * Select a host index for the given task using K8s-style scheduling.
      *
-     * <ol>
-     *   <li>Filter hosts by CPU, RAM, and GPU feasibility</li>
-     *   <li>Score feasible hosts with LeastRequestedPriority</li>
-     *   <li>Return the index of the highest-scoring host</li>
-     * </ol>
-     *
-     * @param hosts ordered host list (same ordering as {@code SimulationManager})
+     * @param hosts ordered host list (same ordering as {@link SimulationManager#getHosts})
      * @param task  the task to schedule
      * @return 0-based host index, or 0 if no feasible host found
      */
@@ -81,7 +73,7 @@ public class VmAllocationPolicyK8sDefault extends VmAllocationPolicyAbstract {
 
         for (int i = 0; i < hosts.size(); i++) {
             Host host = hosts.get(i);
-            if (!canHost(host, task)) continue;
+            if (!mgr.canHost(host, task)) continue;
 
             double score = leastRequestedScore(host);
             if (score > bestScore) {
@@ -89,36 +81,30 @@ public class VmAllocationPolicyK8sDefault extends VmAllocationPolicyAbstract {
                 bestIdx = i;
             }
         }
-
         return (bestIdx >= 0) ? bestIdx : 0;
     }
 
     // ── LeastRequestedPriority scoring ────────────────────────────────────
 
     /**
-     * K8s LeastRequestedPriority: prefer hosts with the most free resources.
+     * K8s LeastRequestedPriority over live SimulationManager state:
      * <pre>
-     *   score = (freeCpu / totalCpu + freeMem / totalMem) / 2
+     *   score = (freePes/pesCount + freeRam/ramMb) / 2
      * </pre>
-     * Range: [0.0, 1.0] where 1.0 = completely idle host.
+     * Range: [0, 1]; 1 = completely idle host.
      */
     private double leastRequestedScore(Host host) {
+        SimulationConfig.HostSpec hs = mgr.hostSpec();
+        double cpuFraction = (double) mgr.freePes(host) / hs.pesCount();
+        double memFraction = (double) mgr.freeRam(host) / hs.ramMb();
+        return (cpuFraction + memFraction) / 2.0;
+    }
+
+    /** Score variant for the CloudSim-internal path (dead code today). */
+    private double leastRequestedScoreFromCloudSim(Host host) {
         double cpuFraction = (double) host.getFreePesNumber() / host.getPesNumber();
         double memFraction = (double) host.getRam().getAvailableResource()
                                      / host.getRam().getCapacity();
         return (cpuFraction + memFraction) / 2.0;
-    }
-
-    // ── Feasibility check ─────────────────────────────────────────────────
-
-    private boolean canHost(Host host, TaskRecord task) {
-        long freePes = host.getFreePesNumber();
-        long freeRam = host.getRam().getAvailableResource();
-        GpuState gpu = gpuRegistry.get(host);
-        int freeGpus = (gpu != null) ? gpu.available() : 0;
-
-        return freePes >= task.pesNeeded()
-            && freeRam >= task.memoryMib()
-            && freeGpus >= task.numGpu();
     }
 }

@@ -1,0 +1,11 @@
+{
+  "total_energy_kwh":     14409.925755,
+  "cpu_energy_kwh":       4505.842622,
+  "gpu_energy_kwh":       9904.083133,
+  "total_tasks":          3569,
+  "sla_violations":       594,
+  "sla_violation_rate":   0.1664,
+  "avg_cpu_utilization":  0.1753,
+  "avg_gpu_utilization":  0.1377,
+  "makespan_sec":         12902960.0
+}

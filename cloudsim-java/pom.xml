@@ -28,6 +28,20 @@
       <artifactId>py4j</artifactId>
       <version>0.10.9.7</version>
     </dependency>
+
+    <!-- T5.3 — Prometheus client (opt-in monitoring). Stays inert unless
+         MONITORING_ENABLED=true is set at JVM startup. Adds ~250 KB to the
+         fat JAR; no runtime overhead when disabled. -->
+    <dependency>
+      <groupId>io.prometheus</groupId>
+      <artifactId>simpleclient</artifactId>
+      <version>0.16.0</version>
+    </dependency>
+    <dependency>
+      <groupId>io.prometheus</groupId>
+      <artifactId>simpleclient_httpserver</artifactId>
+      <version>0.16.0</version>
+    </dependency>
   </dependencies>
 
   <build>

@@ -16,35 +16,44 @@ Không tồn tại một giải pháp duy nhất tối ưu cả hai — thay và
 ## Kiến trúc hệ thống
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                     Docker Compose                           │
-│                                                              │
-│  ┌─────────────────────┐        ┌─────────────────────────┐  │
-│  │   cloudsim-java      │        │      rl-agent            │  │
-│  │                      │        │                          │  │
-│  │  CloudSim Plus       │  Py4J  │  MO-Gymnasium            │  │
-│  │  (Java 21)           │◄──────►│  (Python 3.11)           │  │
-│  │                      │ :25333 │                          │  │
-│  │  • Mô phỏng DC       │        │  • Agent MORL (PPO)      │  │
-│  │  • Mô hình năng lượng │        │  • Vector phần thưởng    │  │
-│  │  • Alibaba Trace      │        │  • Tracking (WandB)      │  │
-│  │  • Baseline K8s       │        │                          │  │
-│  └──────────┬───────────┘        └────────────┬─────────────┘  │
-│             │                                 │                │
-│        trace-data (ro)              model-store               │
-│                    └──── results ────┘                         │
-└──────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                          Docker Compose                                │
+│                                                                        │
+│  ┌─────────────────────┐        ┌─────────────────────────┐            │
+│  │   cloudsim-java     │        │      rl-agent           │            │
+│  │                     │  Py4J  │                         │            │
+│  │  CloudSim Plus      │◄──────►│  MO-Gymnasium           │            │
+│  │  (Java 21)          │ :25333 │  (Python 3.11)          │            │
+│  │                     │        │                         │            │
+│  │  • Mô phỏng DC      │        │  • Agent MORL (PPO)     │            │
+│  │  • Energy model     │        │  • Vector reward        │            │
+│  │  • Alibaba Trace    │        │  • Action masking       │            │
+│  │  • K8s + Random     │        │  • WandB tracking       │            │
+│  │    baselines        │        │                         │            │
+│  └──────────┬──────────┘        └────────────┬────────────┘            │
+│             │ :9091 (opt)                    │ :8000 (opt, Phase 2)    │
+│             ▼                                ▼                         │
+│        ┌─────────────────────────────────────────────┐                 │
+│        │  Prometheus :9090  ◄────►  Grafana :3000    │  profile:       │
+│        │  (opt-in monitoring stack)                  │  monitoring     │
+│        └─────────────────────────────────────────────┘                 │
+│                                                                        │
+│        trace-data (ro) ──┐     ┌── model-store                         │
+│                          └─ results ─┘                                 │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-Hệ thống gồm **4 lớp**:
+Hệ thống gồm **4 lớp core** + **1 lớp Observability tùy chọn**:
 
-**Lớp 1 — Docker Compose:** Điều phối 2 container trên cùng network, chia sẻ dữ liệu qua 3 volume (trace data, kết quả mô phỏng, model đã train).
+**Lớp 1 — Docker Compose:** Điều phối 2 container core trên cùng network `sim-net`, chia sẻ dữ liệu qua 3 volume (`trace-data` read-only, `results` ghi chung, `model-store` cho RL artifacts).
 
-**Lớp 2 — CloudSim Plus (Java):** Engine mô phỏng discrete-event. Tạo datacenter ảo gồm các Host với mô hình năng lượng `P(U) = P_idle + U × (P_max − P_idle)`. Đọc workload thực từ Alibaba GPU Cluster Trace v2023 và chuyển thành các tác vụ mô phỏng.
+**Lớp 2 — CloudSim Plus (Java):** Engine mô phỏng discrete-event. Tạo datacenter ảo gồm các Host với mô hình năng lượng `P(U) = P_idle + U × (P_max − P_idle)`. Đọc workload thực từ Alibaba GPU Cluster Trace v2023 và chuyển thành các tác vụ mô phỏng. `SimulationManager` quản lý vòng đời (reset/step/done) thông qua 2 `SynchronousQueue` đồng bộ sim-thread ↔ gateway-thread.
 
-**Lớp 3 — Py4J Gateway:** Cầu nối RPC in-memory giữa JVM và Python. Agent Python gọi trực tiếp object Java mà không cần serialize qua REST — cho phép vòng lặp RL tốc độ cao (hàng nghìn step/giây).
+**Lớp 3 — Py4J Gateway:** Cầu nối RPC in-memory giữa JVM và Python. `GatewayEntryPoint` expose `reset(scenario, seed)`, `step(hostIndex)`, `getActionMask()`, `selectBaselineAction(policy)`. Agent Python gọi trực tiếp object Java mà không cần serialize qua REST — cho phép vòng lặp RL tốc độ cao.
 
-**Lớp 4 — MO-Gymnasium (Python):** Agent học tăng cường tương tác với môi trường CloudSim. Mỗi bước: nhận trạng thái datacenter → chọn host để phân bổ tác vụ → nhận vector phần thưởng `[R_energy, R_SLA]` → cập nhật policy.
+**Lớp 4 — MO-Gymnasium (Python):** `CloudSimEnv` wrap Java side thành môi trường Gymnasium chuẩn. Mỗi bước: nhận trạng thái datacenter `(3H+4)` chiều → chọn host (đã masked) → nhận vector phần thưởng `[R_energy, R_SLA]` → cập nhật policy. `ScalarRewardWrapper` cộng linear scalarization cho MaskablePPO.
+
+**Lớp 5 — Observability (opt-in, Phase 1.5):** Prometheus scrape `cloudsim-java:9091` (Java exporter) mỗi 2s, Grafana :3000 hiển thị dashboard live (heatmap host utilization, total energy, SLA violations, queue length). Tách hoàn toàn khỏi đường tới hạn — bật bằng `docker compose --profile monitoring up`. **Không thay thế** `metrics.csv` + WandB cho figures báo cáo khoa học (vì Prometheus theo wall-time, không phải sim-time).
 
 ## Mô hình toán học
 
@@ -112,12 +121,26 @@ Tiêu chí đánh giá:
 | Java-Python bridge | Py4J | 0.10.9.7 |
 | Experiment tracking | Weights & Biases | 0.19.1 |
 | Container | Docker Compose v2 | — |
+| Monitoring (opt-in) | Prometheus + Grafana | prom 2.55.x / grafana 11.x |
 
 ## Cách chạy
 
 ```bash
+# Core stack — Java sim + Python agent
 docker compose up --build
+
+# Smoke test (T4.5) — verify full RL loop qua Py4J
+docker compose run --rm rl-agent python src/smoke_test.py
+
+# Baseline evaluation — K8s vs Random
+docker compose run --rm rl-agent python src/baseline_eval.py --scenario HIGH
+
+# Bật monitoring stack (Prometheus :9090 + Grafana :3000)
+docker compose --profile monitoring up --build
+# → mở http://localhost:3000  (admin / xem GF_SECURITY_ADMIN_PASSWORD trong .env)
 ```
+
+Chi tiết xem [assets/docs/RUN_GUIDE.md](assets/docs/RUN_GUIDE.md).
 
 ## Cấu trúc thư mục
 
@@ -132,7 +155,15 @@ ELDAS/
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── src/
+├── monitoring/                 # (Phase 1.5) Prometheus + Grafana provisioning
+│   ├── prometheus.yml
+│   └── grafana/provisioning/
 ├── data/
-│   └── alibaba-trace/          # Dữ liệu workload thực
-└── docs/                       # Tài liệu bổ sung
+│   ├── alibaba-trace/          # Dữ liệu workload thực
+│   └── results/                # baseline-{LOW,HIGH,BURST}/{k8s,random}/{metrics.csv,summary.json}
+├── scripts/                    # download-trace.sh, check-monitoring.sh
+└── assets/
+    ├── docs/RUN_GUIDE.md       # Hướng dẫn build/chạy/test chi tiết
+    ├── planning/               # PDFs đề cương Phase 1 & 2
+    └── report/                 # LaTeX báo cáo
 ```

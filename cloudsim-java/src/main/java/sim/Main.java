@@ -14,6 +14,12 @@ public class Main {
     public static void main(String[] args) throws InterruptedException {
         System.out.println("CloudSim simulation container started.");
 
+        // T5.3 — Optional Prometheus exporter. No-op unless MONITORING_ENABLED=true.
+        // Started BEFORE the gateway so the /metrics endpoint is up before any
+        // simulation activity. Failures here cannot abort startup — see
+        // MetricsRegistry.start() (catches Throwable, logs, returns).
+        MetricsRegistry.start();
+
         // Start Py4J gateway — Python can now connect
         GatewayEntryPoint entryPoint = new GatewayEntryPoint();
         GatewayServer server = GatewayEntryPoint.startServer(entryPoint);
@@ -23,6 +29,7 @@ public class Main {
             System.out.println("[Main] Shutting down...");
             entryPoint.shutdown();
             server.shutdown();
+            MetricsRegistry.stop();
         }, "shutdown-hook"));
 
         // Keep process alive — gateway runs on its own daemon threads

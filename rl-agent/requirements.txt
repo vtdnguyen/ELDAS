@@ -1,6 +1,8 @@
 # Reinforcement Learning
 mo-gymnasium==1.3.2
 stable-baselines3==2.7.0
+# T8.9 — MaskablePPO lives in sb3-contrib (action masking for PPO).
+sb3-contrib==2.7.0
 
 # Java bridge
 py4j==0.10.9.7

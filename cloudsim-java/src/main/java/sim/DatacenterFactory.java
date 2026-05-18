@@ -129,7 +129,10 @@ public final class DatacenterFactory {
         host.setPowerModel(new PowerModelHostSimple(
                 ps.cpuMaxPowerWatt(), ps.cpuIdlePowerWatt()));
 
-        host.enableUtilizationStats();
+        // NOTE: host.enableUtilizationStats() removed — we never submit
+        // Vms to hosts, so CloudSim logs a repetitive INFO warning each
+        // time a host is built. Utilisation is tracked manually in
+        // SimulationManager.hostPeUsage instead.
         return host;
     }
 

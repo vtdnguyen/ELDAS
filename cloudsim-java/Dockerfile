@@ -54,6 +54,10 @@ USER simuser
 
 # Port Py4J Gateway — Python sẽ kết nối vào đây
 EXPOSE 25333
+# T5.3 — Prometheus metrics endpoint (chỉ phục vụ khi MONITORING_ENABLED=true).
+# EXPOSE chỉ là documentation + dùng cho service discovery trong cùng network.
+# Container-to-container scrape KHÔNG cần publish ra host.
+EXPOSE 9091
 
 # JVM tuning cho container:
 # -XX:+UseContainerSupport  → JVM đọc giới hạn CPU/RAM từ cgroup thay vì host

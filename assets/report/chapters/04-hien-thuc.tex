@@ -6,16 +6,18 @@
 \chapter{Hiện thực hệ thống}
 \label{chap:hien-thuc}
 
-Trong khi Chương~\ref{chap:kien-truc} mô tả \emph{thiết kế ở mức contract}
-giữa bốn lớp, chương này đi xuống mức \emph{mã nguồn thực thi} và trình
-bày các quyết định hiện thực nhỏ hơn nhưng quyết định sự đúng đắn của hệ
-thống: chiến lược parsing CSV chịu lỗi, kỹ thuật theo dõi tài nguyên thủ
-công khi đồng hồ CloudSim chưa khởi động, đồng bộ hai luồng qua
-\texttt{SynchronousQueue}, chuyển đổi mảng Java\,$\to$\,\texttt{numpy} an
-toàn, và xử lý các sự cố thực tế trong quá trình tích hợp. Toàn bộ Phase 1
-hiện có $3\,188$ dòng mã chia giữa $10$ lớp Java
-($\approx 1\,800$ dòng) và $7$ module Python ($\approx 1\,400$ dòng);
-Bảng~\ref{tab:loc-summary} liệt kê cụ thể.
+Nếu Chương~\ref{chap:kien-truc} dừng ở mức \emph{thiết kế contract}
+giữa bốn lớp, thì chương này đi xuống mức \emph{mã nguồn thực thi} và
+trình bày những quyết định hiện thực --- tuy nhỏ nhưng có ảnh hưởng
+quyết định đến tính đúng đắn của hệ thống. Cụ thể: chiến lược parse
+CSV chịu lỗi, kỹ thuật theo dõi tài nguyên thủ công khi đồng hồ
+CloudSim chưa được khởi động, cơ chế đồng bộ hai luồng qua
+\texttt{SynchronousQueue}, cách chuyển đổi mảng
+Java\,$\to$\,\texttt{numpy} an toàn, cùng các sự cố gặp phải trong
+quá trình tích hợp. Toàn bộ Phase 1 hiện có $3\,188$ dòng mã, chia
+giữa $10$ lớp Java ($\approx 1\,800$ dòng) và $7$ module Python
+($\approx 1\,400$ dòng); chi tiết liệt kê ở
+Bảng~\ref{tab:loc-summary}.
 
 \begin{table}[H]
   \centering
@@ -56,23 +58,26 @@ Bảng~\ref{tab:loc-summary} liệt kê cụ thể.
 \subsection{Cấu hình dự án Maven}
 \label{ssec:maven}
 
-Dự án Java dùng \emph{Maven 3.9.9} với hai dependency chính: CloudSim
-Plus 8.5.7 và Py4J 0.10.9.7. Listing~\ref{lst:pom} trích đoạn quan trọng
-của \texttt{pom.xml}; điểm đáng chú ý là:
+Dự án Java dùng \emph{Maven 3.9.9} với hai dependency chính là
+CloudSim Plus 8.5.7 và Py4J 0.10.9.7. Listing~\ref{lst:pom} trích phần
+quan trọng của \texttt{pom.xml}; có ba điểm đáng chú ý:
 \begin{itemize}
-  \item \textbf{ArtifactId chính xác.} Phải dùng \texttt{cloudsimplus}
-        (không có dấu gạch ngang) -- artifact \texttt{cloudsim-plus} cũ
-        đã bị deprecate kể từ phiên bản 8 và không còn trên Maven Central.
-        Sai sót này từng tốn $\sim 2$ giờ debug khi Maven báo
+  \item \textbf{ArtifactId chính xác.} Phải khai báo
+        \texttt{cloudsimplus} (không có dấu gạch ngang) ---
+        artifact \texttt{cloudsim-plus} cũ đã bị deprecate từ phiên
+        bản 8 và không còn trên Maven Central. Nhầm tên này từng
+        khiến quá trình debug mất gần $2$ giờ vì Maven liên tục báo
         \texttt{Could not resolve dependencies}.
-  \item \textbf{\texttt{maven-shade-plugin}} đóng gói toàn bộ phụ thuộc
-        thành một \emph{fat JAR} (\texttt{simulation-1.0-SNAPSHOT.jar},
-        $\approx 18$\,MB), giúp container runtime chỉ cần một lệnh
-        \texttt{java -jar} mà không cần \texttt{CLASSPATH} ngoài.
-  \item \textbf{\texttt{<release>21</release>}} đặt tường minh cho
-        \texttt{maven-compiler-plugin}; CloudSim Plus 8.5.7 sử dụng
-        Java \texttt{record}, \texttt{sealed} và \texttt{pattern matching
-        for switch} -- yêu cầu tối thiểu Java 21.
+  \item \textbf{\texttt{maven-shade-plugin}} dùng để đóng gói toàn
+        bộ phụ thuộc thành một \emph{fat JAR}
+        (\texttt{simulation-1.0-SNAPSHOT.jar}, $\approx 18$\,MB); nhờ
+        đó container runtime chỉ cần một lệnh \texttt{java -jar}, không
+        cần \texttt{CLASSPATH} bên ngoài.
+  \item \textbf{\texttt{<release>21</release>}} được đặt tường minh
+        cho \texttt{maven-compiler-plugin}; lý do là CloudSim Plus
+        8.5.7 sử dụng các tính năng \texttt{record}, \texttt{sealed}
+        và \texttt{pattern matching for switch}, yêu cầu Java 21
+        làm mức tối thiểu.
 \end{itemize}
 
 \begin{lstlisting}[style=javastyle, caption={\texttt{pom.xml} -- trích đoạn
@@ -93,10 +98,10 @@ language={[LaTeX]TeX}]
 \subsection{\texttt{DatacenterFactory} -- xây dựng datacenter và registry GPU}
 \label{ssec:impl-factory}
 
-Theo thiết kế ở §\ref{ssec:factory}, mỗi \texttt{Host} CloudSim được kèm
-một \texttt{GpuState} song song trong một \texttt{IdentityHashMap}. Hàm
-factory \texttt{create(simulation, dcSpec, gpuRegistry)} thực hiện sáu
-bước:
+Theo thiết kế ở §\ref{ssec:factory}, mỗi \texttt{Host} của CloudSim đi
+kèm một \texttt{GpuState} song song, đặt trong một
+\texttt{IdentityHashMap}. Hàm factory
+\texttt{create(simulation, dcSpec, gpuRegistry)} thực hiện sáu bước:
 
 \begin{enumerate}
   \item Sinh \texttt{HostSpec.pesCount()} đối tượng \texttt{PeSimple} cho
@@ -113,19 +118,21 @@ bước:
 \end{enumerate}
 
 Hàm \texttt{gpuPowerWatt(gpuState, powerSpec)} hiện thực
-công thức~\eqref{eq:gpu-power}: tổng công suất GPU của host bằng
-$n\cdot P^{\mathrm{idle}} + g\cdot (P^{\mathrm{max}} - P^{\mathrm{idle}})$
-với $g$ là số GPU đang dùng, được \texttt{SimulationManager} gọi mỗi bước
-để tính reward $r^{\mathrm{energy}}_t$.
+công thức~\eqref{eq:gpu-power}: tổng công suất GPU của một host bằng
+$n \cdot P^{\mathrm{idle}} + g \cdot (P^{\mathrm{max}} - P^{\mathrm{idle}})$,
+với $g$ là số GPU đang sử dụng. Hàm này được
+\texttt{SimulationManager} gọi ở mỗi bước để tính reward
+$r^{\mathrm{energy}}_t$.
 
 \subsection{\texttt{AlibabaTraceReader} -- parser chịu lỗi}
 \label{ssec:impl-trace}
 
-File trace có $\sim 8\,000$ dòng; trace thực tế \emph{không} sạch tuyệt
-đối: một số dòng có trường rỗng, giá trị \texttt{nan}, hoặc số cột thiếu
-do ký tự \texttt{,} bên trong tên tác vụ. Triết lý của parser là
-\textbf{tolerant by design}: bỏ qua dòng lỗi và in cảnh báo, không huỷ
-toàn bộ import vì $20$\,dòng hỏng trong $8\,000$ là chấp nhận được.
+File trace có khoảng $8\,000$ dòng và không sạch tuyệt đối trong thực
+tế: có dòng để trống trường, có dòng chứa giá trị \texttt{nan}, có
+dòng thiếu cột do ký tự \texttt{,} xuất hiện ngay trong tên tác vụ.
+Triết lý của parser là \textbf{chấp nhận lỗi cục bộ}: bỏ qua dòng hỏng
+kèm cảnh báo, không huỷ cả quá trình import chỉ vì khoảng $20$ dòng
+hỏng trong tổng số $8\,000$ là mức có thể chấp nhận.
 
 \begin{lstlisting}[style=javastyle, caption={\texttt{AlibabaTraceReader.read()}
 -- tolerant CSV parsing.}, label={lst:trace-read}]
@@ -150,25 +157,50 @@ public static List<TaskRecord> read(String csvPath) throws IOException {
 }
 \end{lstlisting}
 
-Hai helper \texttt{parseIntSafe} và \texttt{parseDoubleSafe} xử lý chuỗi
-rỗng và \texttt{nan} bằng giá trị fallback ($0$); ngoại lệ
-\texttt{NumberFormatException} bị bắt ở mức từng dòng để parser không
-phải xử lý cấp thấp hơn. \emph{Deadline} của tác vụ được dẫn xuất bằng
-chính \texttt{deletionTime} -- giá trị này đại diện cho thời điểm tác vụ
-\emph{thực sự kết thúc} trong K8s gốc, do đó là tham chiếu hợp lý cho
-một scheduler thay thế. Hệ số $\lambda$ được nạp ngay tại đây qua
-\texttt{SimulationConfig.qosToLambda(qos)}.
+Hai helper \texttt{parseIntSafe} và \texttt{parseDoubleSafe} xử lý
+chuỗi rỗng và \texttt{nan} bằng giá trị fallback là $0$; ngoại lệ
+\texttt{NumberFormatException} được bắt ở mức từng dòng, nhờ vậy
+parser không phải đụng đến tầng xử lý thấp hơn. \emph{Deadline} của
+tác vụ được dẫn xuất từ chính \texttt{deletionTime} --- giá trị này
+phản ánh thời điểm tác vụ \emph{thực sự kết thúc} trong K8s gốc, nên
+là tham chiếu hợp lý cho một scheduler thay thế. Hệ số $\lambda$ được
+nạp ngay tại đây thông qua \texttt{SimulationConfig.qosToLambda(qos)}.
 
-\subsection{Hai baseline schedulers}
+\subsection{Năm baseline schedulers}
 \label{ssec:impl-baselines}
 
-Cả hai baseline kế thừa \texttt{VmAllocationPolicyAbstract} của CloudSim
-Plus và \emph{đồng thời} cung cấp một entry-point độc lập
-\texttt{selectHostForTask(hosts, task)} dành cho con đường evaluation
-qua Py4J. Lý do tách hai con đường: pipeline mô phỏng nội bộ của CloudSim
-chỉ làm việc với \texttt{Vm} (không có thông tin GPU) trong khi vòng RL
-phải biết đầy đủ về tác vụ, kể cả số GPU yêu cầu. Hai con đường này
-phối hợp ăn khớp nhau qua cùng tập \texttt{gpuRegistry} dùng chung.
+Năm baseline --- \texttt{VmAllocationPolicyFirstFit},
+\texttt{VmAllocationPolicyBestFit},
+\texttt{VmAllocationPolicyRoundRobin},
+\texttt{VmAllocationPolicyK8sDefault} và
+\texttt{VmAllocationPolicyRandom} --- cùng kế thừa từ
+\texttt{VmAllocationPolicyAbstract} của CloudSim Plus, đồng thời cung
+cấp thêm một entry-point độc lập là
+\texttt{selectHostForTask(hosts, task)} dành cho luồng evaluation qua
+Py4J. Lý do tách thành hai luồng: pipeline mô phỏng nội bộ của
+CloudSim chỉ thao tác với \texttt{Vm} (không mang thông tin GPU),
+trong khi vòng RL cần biết đầy đủ thông tin của tác vụ, kể cả số GPU
+được yêu cầu. Cả hai luồng phối hợp ăn khớp với nhau thông qua cùng
+một bảng \texttt{gpuRegistry} dùng chung, đồng thời đọc trạng thái
+live qua \texttt{SimulationManager.freePes/freeRam/freeGpus}.
+
+\paragraph{FirstFit / BestFit / RoundRobin.}
+Đây là ba chính sách bin-packing cổ điển, bổ sung bên cạnh K8s và
+Random. \textbf{FirstFit} duyệt các host theo thứ tự index và chọn
+host đầu tiên còn đủ tài nguyên. \textbf{BestFit} tính score bằng
+giá trị $\max$ trên ba dimension $(cpu, mem, gpu)$ sau khi đặt, rồi
+chọn host có score cao nhất nhưng vẫn fit; tie-break ưu tiên host\_id
+nhỏ nhất (strict $>$). \textbf{RoundRobin} giữ một con trỏ
+\texttt{nextHostIndex}, advance modulo $H$ sau mỗi allocation thành
+công; nếu con trỏ rơi vào host không fit thì probe tiến tới nhưng
+không advance.
+
+\paragraph{Reset trạng thái của RoundRobin.} RoundRobin có trạng thái
+nội bộ \emph{trong} từng episode (con trỏ). Vì vậy, mỗi lần
+\texttt{GatewayEntryPoint.reset()} được gọi, cả năm baseline đều được
+\emph{khởi tạo lại} thay vì tái sử dụng đối tượng cũ. Pattern này
+ngăn rò rỉ trạng thái giữa các episode mà không cần thêm phương thức
+reset riêng cho từng baseline.
 
 \textbf{Kubernetes-default scheduler.} Listing~\ref{lst:k8s-impl} là
 phần lõi của \texttt{VmAllocationPolicyK8sDefault}: lọc, chấm
@@ -200,21 +232,22 @@ private double leastRequestedScore(Host host) {
 }
 \end{lstlisting}
 
-\textbf{Random scheduler.} Sàng lọc tập khả thi rồi lấy ngẫu nhiên
-đồng đều với \texttt{Random(seed)} -- seed cùng \texttt{RANDOM\_SEED}
-chung của hệ thống đảm bảo \emph{mỗi lần chạy lại trên cùng kịch bản đều
-cho cùng một dãy hành động ngẫu nhiên}. Đây là yêu cầu cứng để bảng số
-liệu Phase 2 có thể được tái sản xuất.
+\textbf{Random scheduler.} Lọc ra tập host khả thi, sau đó lấy ngẫu
+nhiên đồng đều bằng \texttt{Random(seed)}. Seed được chia sẻ với
+\texttt{RANDOM\_SEED} chung của hệ thống, qua đó bảo đảm \emph{mỗi lần
+chạy lại trên cùng kịch bản đều cho cùng một dãy hành động ngẫu nhiên}.
+Đây là yêu cầu cứng để bảng số liệu ở Phase 2 có thể tái lập được.
 
 \subsection{\texttt{SimulationManager} -- chi tiết kỹ thuật quan trọng}
 \label{ssec:impl-sim-manager}
 
-\paragraph{Tracking thủ công thay vì \texttt{simulation.start()}.}
-Như đã đề cập ở §\ref{ssec:sim-manager}, Phase 1 \emph{cố ý} không khởi
-động đồng hồ CloudSim. Hệ quả: \texttt{Host.getCpuPercentUtilization()}
-luôn trả $0$, \texttt{getRam().getAvailableResource()} luôn trả full.
-Để có dữ liệu thật cho observation và reward, \texttt{SimulationManager}
-duy trì hai bản đồ song song:
+\paragraph{Theo dõi tài nguyên thủ công thay cho \texttt{simulation.start()}.}
+Như đã nêu ở §\ref{ssec:sim-manager}, Phase 1 cố ý không khởi động
+đồng hồ CloudSim. Hệ quả là
+\texttt{Host.getCpuPercentUtilization()} luôn trả về $0$, còn
+\texttt{getRam().getAvailableResource()} luôn báo còn đầy. Để vẫn có
+được dữ liệu thật cho observation và reward, \texttt{SimulationManager}
+duy trì hai bảng theo dõi song song:
 
 \begin{lstlisting}[style=javastyle, caption={Manual resource accounting.
 Đây là \emph{nguồn sự thật} duy nhất cho utilisation trong Phase 1.},
@@ -232,38 +265,36 @@ private void allocateTask(TaskRecord task, Host host) {
 }
 \end{lstlisting}
 
-Quyết định này được \emph{lock-in} qua một dòng comment chỉ dẫn rõ
-ràng trong source và được nhắc lại trong \texttt{CLAUDE.md} để các phiên
-phát triển sau không vô tình ``sửa cho đúng'' (gọi
-\texttt{simulation.start()}) -- vốn sẽ phát sinh sự kiện không có handler
-và crash JVM âm thầm.
 
 \paragraph{Đồng bộ hai luồng qua \texttt{SynchronousQueue}.}
 \texttt{stepResultQueue} và \texttt{actionQueue} là hai
-\texttt{SynchronousQueue<T>}: \emph{không có buffer}. Một lời gọi
-\texttt{put(x)} chỉ trả về khi một bên \texttt{take()} đang sẵn sàng nhận.
-Điều này biến mỗi cặp $(\texttt{step()},\,\texttt{stepResultQueue.put})$
-thành một giao dịch nguyên tử nhịp đôi với phía Python -- không có race
-condition giữa hai luồng mà không cần \texttt{synchronized}. Khi reset
-giữa hai episode, hàm \texttt{terminateExisting()} ngắt thread cũ bằng
-\texttt{interrupt() + join(2000ms)} rồi \texttt{poll()} drain hai queue
-để loại bỏ dữ liệu còn sót -- một mẫu thiết kế chuẩn cho thread
-producer/consumer trong Java.
+\texttt{SynchronousQueue<T>}: \emph{không có buffer}. Một lệnh
+\texttt{put(x)} chỉ trả về khi bên kia có một \texttt{take()} đang
+chờ nhận. Đặc tính này biến mỗi cặp
+$(\texttt{step()},\,\texttt{stepResultQueue.put})$ thành một giao
+dịch nguyên tử nhịp đôi với phía Python --- nhờ vậy, hai luồng không
+xảy ra race condition mà không cần đến \texttt{synchronized}. Khi
+reset giữa hai episode, hàm \texttt{terminateExisting()} ngắt thread
+cũ bằng \texttt{interrupt() + join(2000\,ms)}, sau đó dùng
+\texttt{poll()} để drain hai queue, loại bỏ dữ liệu còn sót lại ---
+đây là một mẫu thiết kế chuẩn cho cặp thread producer/consumer trong
+Java.
 
 \paragraph{Tính reward đồng nhất với phát biểu hình thức.}
 Hàm \texttt{computeReward} (Listing~\ref{lst:reward-java} ở Chương~3)
-hiện thực đúng cặp công thức~\eqref{eq:reward-step}: $r^{\mathrm{energy}}_t
-= -\Delta E_t$ và $r^{\mathrm{SLA}}_t = -\lambda(q_i)\,\max(0,\,\hat C_i
-- d_i)$. Khi $\hat C_i > d_i$, đồng thời tăng \texttt{slaViolationCount}
-để \texttt{MetricsExporter} sau này tính tỉ lệ vi phạm.
+hiện thực đúng cặp công thức~\eqref{eq:reward-step}:
+$r^{\mathrm{energy}}_t = -\Delta E_t$ và
+$r^{\mathrm{SLA}}_t = -\lambda(q_i)\,\max(0,\,\hat C_i - d_i)$. Khi
+$\hat C_i > d_i$, hàm này đồng thời tăng \texttt{slaViolationCount}
+để sau đó \texttt{MetricsExporter} tính được tỉ lệ vi phạm.
 
-\subsection{\texttt{MetricsExporter} -- xuất CSV + JSON không phụ thuộc}
+\subsection{\texttt{MetricsExporter} --- xuất CSV và JSON, không cần thư viện ngoài}
 \label{ssec:impl-export}
 
-\texttt{MetricsExporter} chủ ý \emph{không thêm dependency JSON}
-(như Jackson hay Gson) -- Java 15+ đã có \emph{text block}
-(\texttt{"""\,...\,"""}) đủ để format JSON ngắn gọn và rõ ràng. Hai
-\texttt{record} tài liệu hoá schema:
+\texttt{MetricsExporter} cố ý \emph{không thêm dependency JSON} (như
+Jackson hay Gson). Lý do là Java 15 trở lên đã có \emph{text block}
+(\texttt{"""\,\dots\,"""}), đủ để format JSON một cách ngắn gọn và rõ
+ràng. Hai \texttt{record} dưới đây đóng vai trò tài liệu hoá schema:
 
 \begin{itemize}
   \item \texttt{Snapshot}: $9$ trường tương ứng $9$ cột trong
@@ -274,46 +305,55 @@ hiện thực đúng cặp công thức~\eqref{eq:reward-step}: $r^{\mathrm{ener
         Python.
 \end{itemize}
 
-Schema CSV:
+Schema CSV (cột $h{i}\_*$ lặp lại cho mỗi host $i \in [0, H)$):
 \begin{verbatim}
 timestamp, cpu_energy_kwh, gpu_energy_kwh, total_energy_kwh,
 tasks_scheduled, sla_violations, avg_sla_slack,
-cluster_cpu_util, cluster_gpu_util
+cluster_cpu_util, cluster_gpu_util,
+active_hosts, idle_hosts, suspended_hosts,
+total_wakeups, wake_energy_kwh,
+h0_cpu_util, h0_state, ..., h{H-1}_cpu_util, h{H-1}_state
 \end{verbatim}
-Lựa chọn \texttt{Locale.US} cho \texttt{String.format} đảm bảo dấu thập
-phân là \texttt{.} bất kể locale của máy chủ -- tránh trường hợp
-\texttt{,} của locale Việt Nam làm hỏng cấu trúc CSV.
+Việc chọn \texttt{Locale.US} cho \texttt{String.format} đảm bảo dấu
+thập phân luôn là \texttt{.}, bất kể locale của máy chủ là gì --- nhờ
+đó tránh được tình huống dấu \texttt{,} của locale Việt Nam làm hỏng
+cấu trúc CSV. Số cột per-host được sinh động ngay khi ghi header, chứ
+không phải đặt cứng trong mã nguồn.
 
 % ============================================================
 \section{Hiện thực phân hệ Python}
 \label{sec:impl-python}
 
-\subsection{\texttt{state\_builder.py} -- chuyển đổi an toàn và \emph{parsable}}
+\subsection{\texttt{state\_builder.py} --- chuyển đổi an toàn, có thể parse được}
 \label{ssec:impl-state}
 
-Hàm \texttt{from\_java(java\_array, num\_hosts)} làm ba việc theo thứ tự:
-(i)~chuyển \texttt{double[]} (qua Py4J) thành
-\texttt{numpy.float32}; (ii)~validate độ dài đúng bằng $3H + 4$, raise
-\texttt{ValueError} có thông điệp tường minh nếu không khớp;
-(iii)~\texttt{np.clip(obs, 0.0, 1.0, out=obs)} -- chống lỗi tràn nhỏ do
-phía Java đôi khi trả $> 1{,}0$ trong chế độ time-shared. Sau đó vector
-này được trả thẳng ra Gymnasium mà không phải copy thêm.
+Hàm \texttt{from\_java(java\_array, num\_hosts)} thực hiện ba việc
+theo đúng thứ tự: (i)~chuyển \texttt{double[]} (đi qua Py4J) sang
+\texttt{numpy.float32}; (ii)~kiểm tra độ dài có đúng bằng $6H + 4$
+hay không, ném \texttt{ValueError} kèm thông điệp tường minh nếu lệch;
+(iii)~gọi \texttt{np.clip(obs, 0.0, 1.0, out=obs)} để xử lý lỗi tràn
+nhỏ do phía Java thỉnh thoảng trả về giá trị lớn hơn $1{,}0$ trong chế
+độ time-shared. Sau đó, vector này được trả thẳng cho Gymnasium mà
+không cần copy thêm lần nào.
 
-Để tiện debug, module còn cung cấp \texttt{dataclass(frozen=True,
-slots=True)} \texttt{ParsedObservation} cho phép truy cập các thành phần
-theo tên thay vì chỉ số. Dùng \texttt{slots=True} để giảm chi phí bộ nhớ
-khi log hàng triệu observation trong huấn luyện Phase 2.
+Để tiện cho việc debug, module còn cung cấp một
+\texttt{dataclass(frozen=True, slots=True)} mang tên
+\texttt{ParsedObservation}, cho phép truy cập các thành phần theo tên
+thay vì theo chỉ số. Việc bật \texttt{slots=True} giúp giảm đáng kể
+chi phí bộ nhớ khi cần log hàng triệu observation trong quá trình
+huấn luyện ở Phase 2.
 
 \subsection{\texttt{reward.py} -- vector, normalisation, scalarisation}
 \label{ssec:impl-reward}
 
-Module này có ba thành phần độc lập, có thể bật/tắt riêng:
+Module này gồm ba thành phần độc lập, có thể bật/tắt riêng:
 \begin{enumerate}
-  \item \texttt{from\_java(jrew)}: kiểm tra độ dài $= 2$, ép kiểu
-        \texttt{float32}, không clip vì reward âm có ý nghĩa.
-  \item \texttt{RewardNormalizer}: chuẩn hoá Welford online từng thành
-        phần độc lập, công thức cập nhật trung bình $\mu$ và phương sai
-        $M_2$:
+  \item \texttt{from\_java(jrew)}: kiểm tra độ dài đúng bằng $2$,
+        ép kiểu sang \texttt{float32}; không clip vì các giá trị
+        reward âm vẫn mang ý nghĩa.
+  \item \texttt{RewardNormalizer}: chuẩn hoá Welford online cho từng
+        thành phần một cách độc lập, với công thức cập nhật trung
+        bình $\mu$ và phương sai $M_2$ như sau:
         \[
           \mu_n = \mu_{n-1} + \frac{x_n - \mu_{n-1}}{n}, \qquad
           M_{2,n} = M_{2,n-1} + (x_n - \mu_{n-1})(x_n - \mu_n).
@@ -333,17 +373,19 @@ Module này có ba thành phần độc lập, có thể bật/tắt riêng:
 \subsection{\texttt{environment.py} -- gắn kết với Gymnasium API}
 \label{ssec:impl-env}
 
-\texttt{CloudSimEnv} kế thừa \texttt{gym.Env} và tuân thủ chặt giao diện
-Gymnasium 1.0+: \texttt{reset()} trả \texttt{(obs, info)};
-\texttt{step()} trả \texttt{(obs, reward, terminated, truncated, info)}.
-Có hai chi tiết hiện thực đáng lưu ý:
+\texttt{CloudSimEnv} kế thừa \texttt{gym.Env} và tuân thủ chặt chẽ
+giao diện Gymnasium 1.0+: \texttt{reset()} trả về
+\texttt{(obs, info)}, còn \texttt{step()} trả về
+\texttt{(obs, reward, terminated, truncated, info)}. Có hai chi tiết
+hiện thực đáng lưu ý.
 
-\paragraph{Reset bootstrap.} Khi khởi tạo, \texttt{\_\_init\_\_}
-\emph{phải gọi reset một lần} mới biết được số host (do
-\texttt{getActionSize()} chỉ hợp lệ sau \texttt{resetSimulation()}).
-Để tránh tốn một episode reset thừa, kết quả này được cache vào
-\texttt{self.\_initial\_result} và tái sử dụng cho lần \texttt{reset()}
-đầu tiên nếu seed/scenario không đổi:
+\paragraph{Reset khi khởi tạo.} Trong \texttt{\_\_init\_\_},
+\emph{phải gọi reset đúng một lần} thì mới biết được số host (do
+\texttt{getActionSize()} chỉ hợp lệ sau khi
+\texttt{resetSimulation()} đã chạy). Để tránh tốn thêm một episode
+reset thừa, kết quả của lần gọi này được cache vào
+\texttt{self.\_initial\_result} và tái sử dụng cho lần
+\texttt{reset()} đầu tiên nếu cặp seed/scenario không thay đổi:
 
 \begin{lstlisting}[style=pythonstyle, caption={\texttt{CloudSimEnv.reset}
 -- tránh reset thừa lần đầu.}, label={lst:env-reset}]
@@ -369,10 +411,11 @@ def reset(self, *, seed=None, options=None):
 \end{lstlisting}
 
 \paragraph{Action mask an toàn.} Hàm \texttt{action\_masks()} (gọi
-sang Java) có thể trả mask toàn \texttt{False} nếu không host nào còn
-chứa nổi tác vụ. Trong trường hợp đó, Python bật toàn bộ mask về
-\texttt{True} để episode không bị khoá -- Java sau đó vẫn có quyền
-phạt nặng qua $r^{\mathrm{SLA}}$, nên bài toán không bị méo:
+sang Java) có thể trả về mask toàn \texttt{False} khi không có host
+nào còn đủ chỗ cho tác vụ. Trong tình huống này, Python bật toàn bộ
+mask lên \texttt{True} để episode không bị khoá; phía Java sau đó vẫn
+có thể phạt nặng qua $r^{\mathrm{SLA}}$, nên bài toán vẫn được mô tả
+đúng:
 
 \begin{lstlisting}[style=pythonstyle, caption={\texttt{action\_masks()}
 -- fail-open để không khoá episode.}, label={lst:action-masks}]
@@ -384,42 +427,46 @@ def action_masks(self) -> np.ndarray:
     return mask
 \end{lstlisting}
 
-\paragraph{\texttt{ScalarRewardWrapper}.} Phụ thuộc trọng số quét trong
-Phase 2, lớp wrapper kế thừa \texttt{gym.RewardWrapper} chỉ cần override
-\texttt{reward(self, reward)} và truyền \texttt{action\_masks} ngược về
-môi trường gốc -- giữ nguyên hợp đồng MaskablePPO.
+\paragraph{\texttt{ScalarRewardWrapper}.} Dùng cho bước quét trọng số
+ở Phase 2, lớp wrapper này kế thừa \texttt{gym.RewardWrapper}, chỉ
+cần override \texttt{reward(self, reward)} và truyền
+\texttt{action\_masks} ngược về môi trường gốc, qua đó giữ nguyên
+hợp đồng của MaskablePPO.
 
-\paragraph{Đóng kết nối sạch.} \texttt{close()} gọi
-\texttt{gateway.shutdown(send\_shutdown=False)} để đóng kết nối
-\emph{phía client} mà không tắt \texttt{GatewayServer} của Java -- điều
-này cho phép \texttt{baseline\_eval.py} chạy lần lượt nhiều scheduler
-trên cùng một tiến trình Java mà không phải khởi động lại JVM (chi phí
-$\sim 3$\,giây mỗi lần).
+\paragraph{Đóng kết nối sạch.} Hàm \texttt{close()} gọi
+\texttt{gateway.shutdown(send\_shutdown=False)} để đóng kết nối ở
+\emph{phía client} nhưng không tắt \texttt{GatewayServer} phía Java.
+Nhờ vậy, \texttt{baseline\_eval.py} có thể chạy lần lượt nhiều
+scheduler trên cùng một tiến trình Java mà không phải khởi động lại
+JVM (mỗi lần khởi động lại tốn khoảng $3$\,giây).
 
 \subsection{\texttt{tracker.py} -- WandB online/offline tự động}
 \label{ssec:impl-tracker}
 
-Trong điều kiện phòng thí nghiệm không phải lúc nào cũng có Internet
-hoặc \texttt{WANDB\_API\_KEY}. \texttt{ExperimentTracker} dùng pattern
-\emph{degrade gracefully}: hàm \texttt{\_should\_use\_wandb()} kiểm tra
-hai điều kiện -- thư viện \texttt{wandb} có cài và \texttt{WANDB\_API\_KEY}
-không rỗng -- nếu cả hai đúng thì online, ngược lại fallback console.
-Mọi phương thức \texttt{log\_step}, \texttt{log\_episode},
-\texttt{log\_comparison}, \texttt{save\_model} đều có nhánh fallback
-console riêng, cùng schema khoá \texttt{step/...} và \texttt{episode/...}
-để dashboard WandB có thể bật mà không cần đổi code agent.
+Trong điều kiện phòng thí nghiệm, không phải lúc nào cũng có sẵn
+Internet hay \texttt{WANDB\_API\_KEY}. Vì vậy,
+\texttt{ExperimentTracker} dùng nguyên tắc \emph{hạ cấp êm}: hàm
+\texttt{\_should\_use\_wandb()} kiểm tra hai điều kiện --- thư viện
+\texttt{wandb} đã được cài đặt và \texttt{WANDB\_API\_KEY} khác rỗng
+--- nếu cả hai cùng đúng thì log online, còn không thì fallback
+xuống console. Các phương thức \texttt{log\_step},
+\texttt{log\_episode}, \texttt{log\_comparison} và
+\texttt{save\_model} đều có nhánh fallback console riêng và dùng
+chung schema khoá \texttt{step/\dots}, \texttt{episode/\dots}; nhờ
+vậy có thể bật dashboard WandB sau này mà không cần đổi code agent.
 
-\subsection{\texttt{baseline\_eval.py} -- so sánh fair}
+\subsection{\texttt{baseline\_eval.py} --- so sánh công bằng}
 \label{ssec:impl-baseline-eval}
 
-Để đảm bảo tính \emph{fair} khi so sánh ba scheduler ở Phase 2, baseline
-phải vận hành \emph{trong cùng môi trường mô phỏng} với agent RL.
-\texttt{baseline\_eval.py} đạt được điều này bằng cách \emph{không}
-hiện thực lại logic K8s/Random ở Python; thay vào đó nó gọi
-\texttt{env.\_ep.selectBaselineAction("k8s")} để hỏi Java chính bộ
-\texttt{VmAllocationPolicy} đã lock seed (Listing~\ref{lst:baseline-loop}).
-Nhờ vậy, mọi sự khác biệt giữa Random và MORL chỉ phản ánh chất lượng
-chính sách, không phải chi tiết hiện thực.
+Để bảo đảm việc so sánh giữa các scheduler ở Phase 2 là công bằng,
+toàn bộ baseline phải chạy \emph{trong cùng một môi trường mô phỏng}
+với agent RL. \texttt{baseline\_eval.py} đạt được điều này bằng cách
+\emph{không} viết lại logic K8s/Random ở phía Python. Thay vào đó,
+script gọi \texttt{env.\_ep.selectBaselineAction("k8s")} để chính bộ
+\texttt{VmAllocationPolicy} đã lock seed ở phía Java đưa ra quyết
+định (Listing~\ref{lst:baseline-loop}). Nhờ vậy, mọi khác biệt giữa
+Random và MORL chỉ còn phản ánh chất lượng của chính sách, chứ
+không lẫn vào chi tiết hiện thực.
 
 \begin{lstlisting}[style=pythonstyle, caption={\texttt{baseline\_eval.evaluate\_baseline}
 -- tận dụng chung pipeline với RL.}, label={lst:baseline-loop}]
@@ -471,9 +518,10 @@ thước image đo được trên máy phát triển (Windows 11, Docker Desktop
   \end{tabular}
 \end{table}
 
-\textbf{Cache layer.} Trick \emph{copy manifest trước source} đem lại
-hiệu quả thực tế đo được: rebuild đầy đủ ($1$--$2$\,phút) so với rebuild
-sau khi chỉ sửa source ($\sim 10$\,giây). Cụ thể trong Dockerfile Java:
+\textbf{Cache layer.} Thủ thuật \emph{copy manifest trước source}
+đem lại hiệu quả rõ rệt qua đo đạc thực tế: build đầy đủ tốn
+khoảng $1$--$2$ phút, trong khi rebuild sau khi chỉ chỉnh source
+chỉ tốn khoảng $10$ giây. Cụ thể trong Dockerfile Java:
 
 \begin{lstlisting}[style=yamlstyle, caption={Trick layer cache: \texttt{pom.xml}
 trước, \texttt{src/} sau.}, label={lst:dockerfile-cache}]
@@ -494,30 +542,33 @@ COPY --from=builder /build/target/simulation-1.0-SNAPSHOT.jar /app/sim.jar
 \subsection{Quản lý volume}
 \label{ssec:impl-volumes}
 
-Ba volume được khai báo trong \texttt{docker-compose.yml} với chiến
-lược khác nhau theo vai trò:
+Ba volume được khai báo trong \texttt{docker-compose.yml}, mỗi
+volume áp dụng một chiến lược khác nhau tuỳ theo vai trò:
 \begin{itemize}
   \item \texttt{trace-data}: \emph{bind mount} từ
-        \texttt{./data/alibaba-trace} của host. Mount \texttt{:ro}
-        cho \texttt{cloudsim-java} -- Java không thể vô tình ghi đè.
-  \item \texttt{results}: bind mount từ \texttt{./data/results}, được
-        \emph{cả hai service} gắn (Java ghi
-        \texttt{metrics.csv}/\texttt{summary.json}, Python đọc lại để
-        log lên WandB).
-  \item \texttt{model-store}: \emph{named volume} do Docker quản lý,
-        chỉ \texttt{rl-agent} truy cập, lưu checkpoint mô hình PPO.
+        \texttt{./data/alibaba-trace} của host, gắn ở chế độ
+        \texttt{:ro} cho \texttt{cloudsim-java}, qua đó Java
+        không thể vô tình ghi đè dữ liệu.
+  \item \texttt{results}: bind mount từ \texttt{./data/results},
+        được \emph{cả hai service} cùng gắn vào (Java ghi
+        \texttt{metrics.csv} và \texttt{summary.json}, Python đọc
+        lại để log lên WandB).
+  \item \texttt{model-store}: \emph{named volume} do Docker quản
+        lý, chỉ \texttt{rl-agent} truy cập, dùng để lưu checkpoint
+        của mô hình PPO.
 \end{itemize}
-Phân tách rõ \emph{data đầu vào} (read-only) vs \emph{output} (read-write
-chia sẻ) vs \emph{artifact riêng} (Docker-managed) là ứng dụng nguyên tắc
-\textit{principle of least privilege} ở mức storage.
+Việc tách bạch giữa \emph{dữ liệu đầu vào} (chỉ đọc), \emph{dữ liệu
+đầu ra} (đọc--ghi, dùng chung) và \emph{artifact riêng} (do Docker
+quản lý) chính là ứng dụng của nguyên tắc \textit{principle of
+least privilege} ở tầng storage.
 
 \subsection{Vấn đề kỹ thuật gặp phải và giải pháp}
 \label{ssec:impl-issues}
 
-Bảng~\ref{tab:issues} tổng hợp \emph{sáu sự cố thực tế} đã gặp trong
-quá trình hiện thực Phase 1, kèm nguyên nhân gốc rễ và giải pháp đã áp
-dụng. Đây không phải checklist lý thuyết -- mỗi mục đều tương ứng với
-một commit cụ thể trong lịch sử Git.
+Bảng~\ref{tab:issues} tổng hợp \emph{sáu sự cố thực tế} đã gặp
+trong quá trình hiện thực Phase 1, kèm nguyên nhân gốc và giải
+pháp đã áp dụng. Đây không phải là danh sách lý thuyết --- mỗi
+mục đều ứng với một commit cụ thể trong lịch sử Git.
 
 \begin{table}[H]
   \centering
@@ -530,13 +581,12 @@ một commit cụ thể trong lịch sử Git.
     \midrule
     Maven không tải được \texttt{cloudsim-plus}
       & Artifact ID đã đổi tên sang \texttt{cloudsimplus} (không gạch ngang) từ v8.
-      & Sửa \texttt{pom.xml} dùng \texttt{cloudsimplus}; tài liệu hoá trong
-        \texttt{CLAUDE.md} để không lặp lại. \\
+      & Sửa \texttt{pom.xml} dùng \texttt{cloudsimplus}\\
     \texttt{Host.getCpuPercentUtilization()} luôn bằng $0$
       & \texttt{simulation.start()} chưa được gọi $\Rightarrow$
         đồng hồ CloudSim chưa chạy.
       & Bypass: theo dõi tài nguyên thủ công bằng
-        \texttt{HashMap<Host, Integer>}; lock-in bằng comment + CLAUDE.md. \\
+        \texttt{HashMap<Host, Integer>}; lock-in bằng comment. \\
     JVM crash âm thầm khi gọi \texttt{broker.submitVm}
       & \texttt{simulation.schedule()} đẩy event vào loop chưa khởi động
         $\Rightarrow$ NPE deep inside CloudSim.
@@ -562,83 +612,278 @@ một commit cụ thể trong lịch sử Git.
 \end{table}
 
 % ============================================================
-\section{Smoke test end-to-end}
-\label{sec:impl-smoke}
+\section{Hiện thực Lớp 5 — Observability stack}
+\label{sec:impl-monitoring}
 
-Để xác nhận bốn lớp nối đúng nhau, ELDAS kèm \texttt{smoke\_test.py}
-($350$ dòng) chạy tám pha kiểm thử tăng dần độ phủ
-(Bảng~\ref{tab:smoke-phases}). Mỗi pha là một \texttt{assert} cô lập
-với thông báo lỗi rõ ràng -- nếu pha $k$ thất bại, các pha $> k$ không
-chạy.
+Phần thiết kế của lớp này đã được trình bày ở
+§\ref{sec:layer-observability}. Mục dưới đây đi vào chi tiết hiện
+thực: phơi metric từ JVM, cấu hình Prometheus, provisioning Grafana
+và script kiểm tra end-to-end.
+
+\subsection{\texttt{MetricsRegistry} --- façade tĩnh, an toàn khi tắt}
+Toàn bộ phần tương tác với Prometheus simpleclient được gói trong
+lớp \texttt{MetricsRegistry} (file
+\texttt{cloudsim-java/src/main/java/sim/MetricsRegistry.java},
+khoảng $230$ dòng). Lớp này được thiết kế theo dạng \emph{façade
+tĩnh}: không có instance, mọi state là \texttt{static volatile}.
+Đặc tả tóm lược nằm ở Listing~\ref{lst:metrics-registry}.
+
+\begin{lstlisting}[style=javastyle, caption={Bộ khung
+\texttt{MetricsRegistry}: cờ \texttt{enabled} kiểm soát no-op,
+mọi mutator wrap try/catch.},
+label={lst:metrics-registry}]
+public final class MetricsRegistry {
+    private static volatile boolean enabled = false;
+    private static HTTPServer server;
+    private static Gauge   hostCpuUtil, hostMemUtil, hostGpuUtil,
+                           hostPowerWatt, totalEnergyKwh,
+                           pendingTasks, simClockSeconds;
+    private static Counter slaViolationsTotal, tasksScheduledTotal;
+
+    public static synchronized void start() {
+        if (enabled || server != null) return;            // idempotent
+        if (!"true".equalsIgnoreCase(
+                System.getenv("MONITORING_ENABLED"))) {
+            return;                                       // no-op
+        }
+        try {
+            registerMetrics();
+            server = new HTTPServer.Builder()
+                        .withPort(port()).build();
+            enabled = true;
+        } catch (Throwable t) {
+            safeStop();                                   // never crash
+        }
+    }
+
+    public static void recordHost(int i, double cpu,
+            double mem, double gpu, double watt) {
+        if (!enabled) return;                             // hot fast path
+        try {
+            String hid = Integer.toString(i);
+            hostCpuUtil.labels(hid, scenarioTag, schedulerTag)
+                       .set(clamp01(cpu));
+            // ... mem, gpu, power
+        } catch (Throwable t) { /* swallowed, logged once */ }
+    }
+}
+\end{lstlisting}
+
+Một vài đặc điểm cần lưu ý:
+
+\begin{itemize}
+  \item Cờ \texttt{enabled} chỉ cần khai báo \texttt{volatile}
+        chứ không cần đến lock: Prometheus simpleclient dùng
+        \texttt{DoubleAdder} ở bên trong, nên gauge/counter đã
+        thread-safe sẵn; mặt khác, thay đổi cờ ở một thread sẽ
+        được các thread khác đọc thấy ngay.
+  \item Bắt \texttt{Throwable} chứ không phải \texttt{Exception}:
+        nhờ vậy, ngay cả \texttt{OutOfMemoryError} hay
+        \texttt{LinkageError} cũng bị nuốt --- đường tới hạn
+        không được phép ``ngã'' chỉ vì một bug của exporter.
+  \item \texttt{stop()} gọi
+        \texttt{CollectorRegistry.defaultRegistry.clear()} để
+        các lần \texttt{start()} kế tiếp có thể đăng ký lại
+        thành công, tránh lỗi ``Collector already registered''
+        của simpleclient.
+\end{itemize}
+
+\subsection{Bốn điểm móc nối trong \texttt{SimulationManager}}
+\texttt{MetricsRegistry} chỉ thực sự hữu ích nếu được gọi đúng chỗ.
+Phần code sim hiện tại được \emph{chèn bốn điểm móc}
+(Bảng~\ref{tab:hook-points}); mỗi điểm chỉ thêm tối đa hai dòng và
+không làm thay đổi logic vốn có.
 
 \begin{table}[H]
   \centering
-  \caption{Tám pha của smoke test \texttt{T4.5}.}
-  \label{tab:smoke-phases}
+  \caption{Bốn điểm móc Prometheus trong \texttt{SimulationManager}.}
+  \label{tab:hook-points}
   \footnotesize
   \begin{tabularx}{\linewidth}{l X}
     \toprule
-    \textbf{Pha} & \textbf{Kiểm tra} \\
+    \textbf{Vị trí} & \textbf{Hành động} \\
     \midrule
-    1 -- Connection      & Py4J kết nối được, \texttt{getActionSize > 0},
-                           \texttt{observation\_space} đúng $(3H+4,)$ \\
-    2 -- Reset           & \texttt{reset()} trả \texttt{obs} đúng shape,
-                           dtype \texttt{float32}, mọi giá trị $\in [0,1]$ \\
-    3 -- Action mask     & Mask đúng shape $(H,)$, dtype \texttt{bool},
-                           có ít nhất một host khả thi \\
-    4 -- Single step     & \texttt{step()} trả 5-tuple đúng kiểu;
-                           $r^{\mathrm{energy}} \le 0$, $r^{\mathrm{SLA}} \le 0$ \\
-    5 -- Full episode    & Chạy hết tác vụ; tự nhiên \texttt{terminated=True};
-                           kiểm tra $r^{\mathrm{energy}} < -120$
-                           (ngưỡng idle power) cho chứng cứ ``manual PE
-                           tracking đang hoạt động'' \\
-    6 -- Metrics export  & \texttt{exportMetrics(\$DIR)} ghi
-                           \texttt{metrics.csv} + \texttt{summary.json} \\
-    7 -- Scalar wrapper  & \texttt{ScalarRewardWrapper} trả \texttt{float};
-                           giá trị $\approx \mathbf{w}\cdot\mathbf{r}$ \\
-    8 -- Baseline action & \texttt{selectBaselineAction("k8s")} và
-                           \texttt{("random")} trả chỉ số host hợp lệ \\
+    Cuối \texttt{buildSimulation()}
+        & \texttt{setContext(scenario, scheduler)},
+          \texttt{onEpisodeStart()}, \texttt{setPendingTasks(N)}. Reset
+          gauge per-episode; counter giữ nguyên. \\
+    Trong \texttt{allocateTask()}
+        & \texttt{incTasksScheduled()} sau khi đặt task thành công. \\
+    Trong \texttt{computeReward()} (nhánh vi phạm)
+        & \texttt{incSlaViolation(task.qos())} khi
+          $\text{slack} > 1\,\text{s}$. \\
+    Cuối \texttt{recordSnapshot()}
+        & Vòng \texttt{for} qua $H$ host gọi \texttt{recordHost()};
+          cập nhật \texttt{setTotalEnergyKwh}, \texttt{setSimClock},
+          \texttt{setPendingTasks}. Toàn bộ wrap trong \texttt{try/catch
+          Throwable}. \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
+\subsection{Bật/tắt và truyền tham số}
+Lớp này được kích hoạt bằng biến môi trường
+\texttt{MONITORING\_ENABLED=true}, truyền qua
+\texttt{docker-compose.yml}. Đoạn config dưới đây minh hoạ tính
+\emph{opt-in}: hai service quan sát được đặt dưới
+\texttt{profiles: ["monitoring"]}, mặc định không khởi động cùng các
+service core.
+
+\begin{lstlisting}[style=yamlstyle, caption={Trích
+\texttt{docker-compose.yml}: profile \texttt{monitoring}.},
+label={lst:compose-monitoring}]
+prometheus:
+  image: prom/prometheus:v2.55.1
+  profiles: ["monitoring"]
+  ports: ["9090:9090"]
+  volumes:
+    - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - prometheus-data:/prometheus
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/ready || exit 1"]
+
+grafana:
+  image: grafana/grafana:11.3.1
+  profiles: ["monitoring"]
+  depends_on: { prometheus: { condition: service_healthy } }
+  ports: ["3000:3000"]
+  volumes:
+    - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+    - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+    - grafana-data:/var/lib/grafana
+\end{lstlisting}
+
+\subsection{Cấu hình Prometheus}
+File \texttt{monitoring/prometheus.yml} khai báo hai job;
+\texttt{scrape\_interval} được đặt khá ngắn ($2$\,s) để có thể bắt
+được những thay đổi nhanh giữa các bước RL:
+
+\begin{lstlisting}[style=yamlstyle, caption={\texttt{prometheus.yml} --
+hai job, cho phép \texttt{rl\_agent} down.},
+label={lst:prometheus-yml}]
+global:
+  scrape_interval: 2s
+  scrape_timeout:  1s
+scrape_configs:
+  - job_name: cloudsim_java
+    static_configs:
+      - targets: ["cloudsim-java:9091"]
+  - job_name: rl_agent              # ephemeral, may be down
+    static_configs:
+      - targets: ["rl-agent:8000"]
+    honor_labels: true
+\end{lstlisting}
+
+\subsection{Provisioning Grafana và dashboard \texttt{ELDAS Live}}
+Grafana được cấu hình theo hướng \emph{infrastructure-as-code}: sau
+lần khởi động đầu tiên, không cần thao tác gì thêm trên UI.
+
+\begin{itemize}
+  \item \texttt{provisioning/datasources/prometheus.yml} -- tự tạo
+        datasource UID \texttt{eldas-prometheus} trỏ về
+        \texttt{http://prometheus:9090}.
+  \item \texttt{provisioning/dashboards/dashboards.yml} -- nhà cung cấp
+        dashboard kiểu \texttt{file}, quét thư mục mỗi $10$\,s.
+  \item \texttt{provisioning/dashboards/eldas-live.json} -- dashboard
+        chính, gồm bốn nhóm panel (overview, host heatmap, power+queue,
+        SLA breakdown), có \emph{templating variables}
+        \texttt{\$scenario}, \texttt{\$scheduler} để lọc đa lựa chọn.
+\end{itemize}
+
+Một quyết định đáng chú ý: panel ``heatmap host utilisation'' không
+dùng loại \texttt{heatmap} của Grafana (loại đó vốn dành cho
+histogram bucket), mà dùng panel \textbf{state timeline} với sáu
+\emph{khoảng màu rời rạc} ($0$--$0.2$ xanh đậm, $0.2$--$0.4$ xanh lá,
+$0.4$--$0.6$ xanh nhạt, $0.6$--$0.8$ vàng, $0.8$--$0.95$ cam,
+$\geq 0.95$ đỏ). Cách trình bày này tạo ra \emph{dấu hiệu trực quan}
+rất rõ cho từng chiến lược: K8s rải đều cho dải xanh--vàng nhạt phủ
+đều $10$ host, trong khi MORL gom chặt sẽ tạo các hàng đỏ nằm kề các
+hàng xanh sẫm. Đây cũng chính là minh hoạ trực quan cho sự đánh đổi
+mà đồ án đang khảo sát.
+
+\subsection{Script kiểm tra T5.7}
+\texttt{scripts/check-monitoring.sh} là một smoke test gồm năm bước
+cho lớp Observability, chỉ dùng \texttt{curl} mà không phụ thuộc vào
+\texttt{jq}. Bảng~\ref{tab:t57-steps} liệt kê các bước; output có
+màu khi chạy trên TTY, exit code trả về $0/1$ để tương thích với CI.
+
+\begin{table}[H]
+  \centering
+  \caption{Năm bước của \texttt{check-monitoring.sh}.}
+  \label{tab:t57-steps}
+  \footnotesize
+  \begin{tabularx}{\linewidth}{l X}
+    \toprule
+    \textbf{Bước} & \textbf{Kiểm tra} \\
+    \midrule
+    1 -- Java exporter
+        & \texttt{curl :9091/metrics}; đếm \texttt{\# TYPE eldas\_} $\geq 8$;
+          đếm số series tồn tại. \\
+    2 -- Prometheus targets
+        & \texttt{curl :9090/api/v1/targets}; xác nhận
+          \texttt{cloudsim\_java} \texttt{health=up}. \\
+    3 -- Prometheus query
+        & \texttt{count(eldas\_host\_cpu\_util)} trả ra $10$
+          (đủ host). \\
+    4 -- Grafana health
+        & \texttt{curl :3000/api/health}; xác nhận
+          \texttt{database=ok}. \\
+    5 -- Datasource proxy
+        & \texttt{api/datasources/uid/eldas-prometheus/health}
+          \emph{kèm Basic Auth} trả \texttt{status=OK}; xác nhận
+          dashboard \texttt{eldas-live} đã được provision. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ============================================================
+\section{Smoke test end-to-end}
+\label{sec:impl-smoke}
+
+Để xác nhận bốn lớp đã được nối đún($350$ dòng), chạy tám pha kiểm thử, mỗi pha là một
+\texttt{assert} độc lập, kèm thông báo lỗi tường minh; nếu pha $k$
+thất bại, các pha tiếp theo sẽ không được chạy.
+
 \paragraph{Cách chạy.}
-Sau khi \texttt{docker compose up --build} thấy cả hai service \texttt{healthy}:
+Sau khi \texttt{docker compose up --build} đã đưa cả hai service về
+trạng thái \texttt{healthy}:
 \begin{lstlisting}[style=yamlstyle, caption={Lệnh chạy smoke test.}, label={lst:run-smoke}]
 docker compose run --rm rl-agent python src/smoke_test.py \
     --scenario LOW --max-steps 3000 --output /data/results/smoke
 \end{lstlisting}
 
-Kết quả mong đợi: tám pha đều \texttt{[OK]}, tổng thời gian
-$\sim 5$--$8$\,giây trên CPU thường, đầu ra
-\texttt{data/results/smoke/metrics.csv} (\texttt{$\sim 2\,000$ dòng}) và
-\texttt{summary.json}. Chương~\ref{chap:ket-qua} sẽ trình bày kết quả
-cụ thể: bảng giá trị reward/energy, ảnh chụp log, ảnh chụp file CSV.
+Kết quả mong đợi: cả tám pha đều trả \texttt{[OK]}; tổng thời gian
+chạy khoảng $5$--$8$ giây trên CPU thông thường; đầu ra gồm
+\texttt{data/results/smoke/metrics.csv} (khoảng $2\,000$ dòng) và
+\texttt{summary.json}. Chương~\ref{chap:ket-qua} sẽ trình bày kết
+quả cụ thể: bảng giá trị reward/energy, ảnh chụp log và ảnh chụp
+file CSV.
 
 % ============================================================
 \section{Tổng kết chương}
 \label{sec:ket-luan-c4}
 
-Chương này đã đi qua từng quyết định hiện thực ở mức mã nguồn của bốn
-lớp:
+Chương này đã đi qua từng quyết định hiện thực ở mức mã nguồn của
+cả bốn lớp:
 \begin{itemize}
-  \item \textbf{Lớp 2 (Java).} Maven + fat JAR, parser CSV chịu lỗi,
-        hai baseline scheduler chia sẻ \texttt{gpuRegistry}, manual
-        resource tracking, đồng bộ hai luồng qua \texttt{SynchronousQueue},
-        và xuất metrics không phụ thuộc.
-  \item \textbf{Lớp 4 (Python).} Chuyển đổi an toàn Java\,$\to$\,numpy,
-        Welford normaliser, wrapper Gymnasium chuẩn 1.0+, fallback
-        WandB tự động.
-  \item \textbf{Lớp 1 (Docker).} Multi-stage build, layer cache trick,
-        bind mount read-only cho dữ liệu đầu vào, retry phía client
-        bù healthcheck timing.
-  \item \textbf{Smoke test} kiểm chứng cả vòng RL trên cùng pipeline
-        đã sẵn sàng cho huấn luyện Phase 2.
+  \item \textbf{Lớp 2 (Java).} Maven kết hợp fat JAR, parser CSV
+        chịu lỗi, năm baseline scheduler dùng chung
+        \texttt{gpuRegistry}, cơ chế theo dõi tài nguyên thủ
+        công cùng máy trạng thái host, đồng bộ hai luồng qua
+        \texttt{SynchronousQueue} và phần xuất metrics không
+        phụ thuộc thư viện ngoài.
+  \item \textbf{Lớp 4 (Python).} Cách chuyển đổi an toàn từ Java
+        sang numpy, bộ chuẩn hoá Welford, wrapper theo chuẩn
+        Gymnasium 1.0+ và cơ chế fallback WandB tự động.
+  \item \textbf{Lớp 1 (Docker).} Build hai stage, thủ thuật
+        layer cache, bind mount chỉ đọc cho dữ liệu đầu vào và
+        cơ chế retry phía client để bù sai số thời điểm
+        healthcheck.
+  \item \textbf{Smoke test} kiểm chứng cả vòng RL trên cùng một
+        pipeline đã sẵn sàng cho huấn luyện ở Phase 2.
 \end{itemize}
 
-Bảng~\ref{tab:issues} đã tổng hợp \emph{sáu sự cố thực tế} -- bằng
-chứng cho thấy hệ thống không phải lý thuyết suông mà đã đi qua đủ
-chu kỳ \emph{thử-sai-sửa}. Chương kế tiếp trình bày kết quả định lượng
-của Phase 1: log smoke test thành công, metrics
-\texttt{energy/SLA} ban đầu của hai baseline trên ba kịch bản, và xác
-nhận tính lặp lại của hệ thống qua \texttt{RANDOM\_SEED}.
+Chương kế tiếp trình bày kết quả định lượng của Phase 1: log
+smoke test thành công, bảng so sánh năm baseline cổ điển cùng
+MORL PPO tối thiểu trên cả ba kịch bản, và phần xác nhận tính
+lặp lại của hệ thống thông qua \texttt{RANDOM\_SEED}.

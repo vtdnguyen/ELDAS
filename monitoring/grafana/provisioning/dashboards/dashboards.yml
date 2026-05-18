@@ -1,0 +1,19 @@
+# T5.5 — Dashboard provider.
+#
+# Tells Grafana where to look for dashboard JSON files. Anything matching
+# *.json under the configured path is loaded automatically.
+
+apiVersion: 1
+
+providers:
+  - name: ELDAS
+    orgId: 1
+    folder: ELDAS
+    type: file
+    disableDeletion: false
+    # allowUiUpdates lets you edit dashboards in the UI for exploration
+    # without them being immediately overwritten. Set to false for prod.
+    allowUiUpdates: true
+    updateIntervalSeconds: 10
+    options:
+      path: /etc/grafana/provisioning/dashboards

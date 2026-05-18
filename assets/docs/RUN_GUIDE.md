@@ -1,318 +1,250 @@
-# ELDAS — Hướng dẫn chạy & kiểm tra
+# ELDAS — Run Guide
 
-Tài liệu này hướng dẫn cách build, chạy, smoke test, và đánh giá baseline cho hệ thống ELDAS sau khi hoàn thành Phase 1 (T1–T4).
-
----
-
-## 1. Yêu cầu hệ thống
-
-| Phần mềm | Phiên bản tối thiểu | Ghi chú |
-|---|---|---|
-| Docker Desktop | 24.x | có Compose v2 |
-| RAM | 4 GB | tối thiểu để chạy CloudSim + Python |
-| Disk | 2 GB | image + trace data |
-| Trace data | có sẵn tại `data/alibaba-trace/openb_pod_list_default.csv` | nếu thiếu, chạy `bash scripts/download-trace.sh` |
+Tài liệu tham khảo nhanh: chỉ những lệnh cần dùng và mỗi lệnh làm gì. Không có giải thích lý thuyết — cho phần đó xem `CLAUDE.md` (root) hoặc báo cáo trong `assets/report/`.
 
 ---
 
-## 2. Cấu hình môi trường
+## 1. Yêu cầu
 
-File [.env](../.env) đã có sẵn các giá trị mặc định:
+| Thành phần       | Phiên bản tối thiểu | Ghi chú                                 |
+|------------------|---------------------|-----------------------------------------|
+| Docker Desktop   | 24.x (Compose v2)   | bắt buộc                                |
+| RAM / Disk       | 4 GB / 2 GB         | image core ~600 MB; +600 MB monitoring  |
+| Trace data       | có sẵn ở `data/alibaba-trace/` | thiếu → chạy `bash scripts/download-trace.sh` |
+
+---
+
+## 2. Cấu hình `.env`
 
 ```env
 PY4J_PORT=25333
-ENERGY_WEIGHT=0.8
+ENERGY_WEIGHT=0.8           # default Phase-2 sẽ sweep
 SLA_WEIGHT=0.2
-RANDOM_SEED=42
-WANDB_API_KEY=         # để trống → log offline ra console
+RANDOM_SEED=42              # dùng chung Java + Python
+WANDB_API_KEY=              # trống → log offline
+MONITORING_ENABLED=true     # Phase 1.5; false → JVM exporter no-op
+METRICS_PORT=9091
+GF_ADMIN_USER=admin         # optional override
+GF_ADMIN_PASSWORD=admin
 ```
-
-Để bật WandB: lấy API key tại https://wandb.ai/authorize và điền vào `WANDB_API_KEY=...`.
 
 ---
 
-## 3. Build & khởi động hệ thống
+## 3. Docker — vòng đời container
 
-### Bước 1 — Build cả 2 service
-
-```bash
+```powershell
+# Build cả hai service core
 docker compose build
-```
 
-**Output mong đợi**: 2 image `eldas-cloudsim-java` và `eldas-rl-agent` được build thành công, mỗi cái khoảng 1–3 phút lần đầu.
+# Khởi động core stack (cloudsim-java + rl-agent)
+docker compose up --build              # foreground
+docker compose up -d cloudsim-java     # chỉ Java service, background
 
-### Bước 2 — Khởi động Java gateway
-
-```bash
-docker compose up -d cloudsim-java
-```
-
-**Kiểm tra healthcheck**:
-
-```bash
+# Trạng thái + logs
 docker compose ps
-```
+docker compose logs -f cloudsim-java
 
-Đợi đến khi cột `STATUS` của `cloudsim-java` chuyển từ `starting` sang `healthy` (~15–30 giây).
+# Mở shell trong container
+docker compose run --rm rl-agent bash
+docker compose run --rm --no-deps --entrypoint bash cloudsim-java
 
-```
-NAME        IMAGE                 STATUS                  PORTS
-cloudsim    eldas-cloudsim-java   Up 30 seconds (healthy) 0.0.0.0:25333->25333/tcp
-```
-
-**Kiểm tra log Java**:
-
-```bash
-docker compose logs cloudsim-java
-```
-
-Bạn sẽ thấy:
-
-```
-CloudSim simulation container started.
-[GatewayEntryPoint] Py4J GatewayServer listening on 0.0.0.0:25333
+# Dừng
+docker compose down                    # giữ volume
+docker compose down -v                 # XOÁ luôn data/results — cẩn thận
 ```
 
 ---
 
-## 4. T4.5 — Smoke Test (kiểm tra full RL loop)
+## 4. Tests
 
-Đây là test **end-to-end** quan trọng nhất, kiểm tra xem Python ↔ Java có thực sự nói chuyện được không, và toàn bộ vòng `reset → step → reward → done` có hoạt động.
+### 4.1. Java validation (offline, không cần Python)
 
-### Cách chạy
+```powershell
+# Rebuild image trước nếu source Java đổi
+docker compose build cloudsim-java
 
-```bash
-docker compose run --rm rl-agent python src/smoke_test.py
+# Chạy ValidationRunner — 16 bug-regression assertion (B1–B10)
+docker compose run --rm --no-deps --entrypoint java cloudsim-java `
+    -cp simulation.jar sim.ValidationRunner
+
+# Chạy MetricsRegistryTest — test riêng Prometheus exporter
+docker compose run --rm --no-deps --entrypoint java cloudsim-java `
+    -cp simulation.jar sim.MetricsRegistryTest                          # disabled mode
+docker compose run --rm --no-deps -e MONITORING_ENABLED=true `
+    --entrypoint java cloudsim-java -cp simulation.jar sim.MetricsRegistryTest  # enabled mode
 ```
 
-Hoặc tùy chỉnh:
+Exit code 0 = tất cả assertion PASS. Output có `[PASS] / [FAIL]` từng dòng.
 
-```bash
+### 4.2. Python smoke test (full RL loop qua Py4J)
+
+```powershell
+# Khởi động Java service trước, đợi healthy
+docker compose up -d cloudsim-java
+
+# Smoke test — 8 pha (connection → reset → step → reward → done → export)
+docker compose run --rm rl-agent python src/smoke_test.py
 docker compose run --rm rl-agent python src/smoke_test.py --scenario LOW --max-steps 100
 ```
 
-### Output mong đợi
+### 4.3. Baseline evaluation
 
-```
-╔══════════════════════════════════════════════════════════════════════╗
-║       ELDAS Smoke Test — T4.5 — Full RL Loop via Py4J              ║
-╚══════════════════════════════════════════════════════════════════════╝
-ℹ Scenario: LOW
-ℹ Seed: 42
-
-══════════════════════════════════════════════════════════════════════
-  Phase 1: Py4J Connection
-══════════════════════════════════════════════════════════════════════
-ℹ Gateway endpoint: cloudsim-java:25333
-✓ Got 10 hosts from Java
-✓ Action space size = num hosts (10)
-✓ Observation shape = (3H+4,) = (34,)
-
-══════════════════════════════════════════════════════════════════════
-  Phase 2: Reset
-══════════════════════════════════════════════════════════════════════
-✓ Observation has correct shape (34,)
-✓ Observation dtype is float32
-✓ Observation is within declared space [0, 1]
-✓ Initial task index = 0
-
-══════════════════════════════════════════════════════════════════════
-  Phase 3: Action Mask
-══════════════════════════════════════════════════════════════════════
-✓ Mask shape matches num hosts (10)
-✓ At least one host is feasible
-ℹ Feasible hosts: 10/10
-
-══════════════════════════════════════════════════════════════════════
-  Phase 4: Single Step
-══════════════════════════════════════════════════════════════════════
-✓ Reward is vector of shape (2,)
-✓ R_energy ≤ 0 (got -125.4321)
-✓ R_sla ≤ 0 (got -0.0000)
-
-══════════════════════════════════════════════════════════════════════
-  Phase 5: Full Episode (max 200 steps)
-══════════════════════════════════════════════════════════════════════
-  step    0: action= 3, R_energy=  -125.4321, R_sla=  0.0000
-  step   20: action= 7, R_energy=  -243.1100, R_sla= -2.5000
-  ...
-✓ Episode terminated naturally after 134 steps
-ℹ Total energy: 0.012345 kWh
-
-══════════════════════════════════════════════════════════════════════
-  Phase 6: Metrics Export
-══════════════════════════════════════════════════════════════════════
-✓ Java MetricsExporter wrote files (check /data/results/smoke/...)
-
-══════════════════════════════════════════════════════════════════════
-  ✓ ALL SMOKE TESTS PASSED
-══════════════════════════════════════════════════════════════════════
-The full RL loop is operational.
-```
-
-### Output files
-
-Sau smoke test, kiểm tra files được Java exporter ghi:
-
-```bash
-docker compose run --rm rl-agent ls -la /data/results/smoke/
-```
-
-Bạn sẽ thấy:
-- **`metrics.csv`** — một dòng/snapshot, gồm `timestamp, cpu_energy_kwh, gpu_energy_kwh, total_energy_kwh, tasks_scheduled, sla_violations, ...`
-- **`summary.json`** — tổng hợp cuối episode
-
-### Khi smoke test fail
-
-| Triệu chứng | Nguyên nhân | Cách fix |
-|---|---|---|
-| `Cannot connect to Py4J gateway` | Java chưa healthy | `docker compose ps` → đợi healthy hoặc xem log Java |
-| `Trace file is empty` / `IOException` | Thiếu trace data | `bash scripts/download-trace.sh` |
-| `Observation length mismatch` | Java/Python desync về số host | Kiểm tra `SimulationConfig.DEFAULT_DC` |
-| `R_energy > 0` | Bug logic năng lượng Java | Kiểm tra `SimulationManager.computeReward()` |
-
----
-
-## 5. Chạy Baseline Evaluation
-
-Sau khi smoke test pass, chạy 2 baseline scheduler (K8s + Random) để có điểm so sánh cho RL.
-
-```bash
+```powershell
+# Chạy K8s + Random trên 1 kịch bản
 docker compose run --rm rl-agent python src/baseline_eval.py --scenario HIGH --seed 42
-```
 
-### Output mong đợi
-
-```
-[baseline_eval] Running baseline: k8s (scenario=HIGH, seed=42)
-[baseline_eval] k8s: 1234 steps, energy=0.5432 kWh, r_energy=-1953.21, r_sla=-12.50
-
-[baseline_eval] Running baseline: random (scenario=HIGH, seed=42)
-[baseline_eval] random: 1234 steps, energy=0.6789 kWh, r_energy=-2444.10, r_sla=-45.00
-
-[tracker] === Scheduler Comparison ===
-  k8s: energy_kwh=0.5432, total_energy_reward=-1953.21, total_sla_reward=-12.5
-  random: energy_kwh=0.6789, total_energy_reward=-2444.10, total_sla_reward=-45.0
-
-[baseline_eval] Results saved to /data/results/baseline_results.json
-```
-
-### Output files
-
-```bash
-docker compose run --rm rl-agent cat /data/results/baseline_results.json
-```
-
-```json
-{
-  "k8s": {
-    "scheduler": "k8s",
-    "scenario": "HIGH",
-    "steps": 1234,
-    "total_energy_kwh": 0.5432,
-    "total_energy_reward": -1953.21,
-    "total_sla_reward": -12.5
-  },
-  "random": { ... }
+# Chạy cả 3 kịch bản (sinh data cho báo cáo)
+foreach ($scen in 'LOW','HIGH','BURST') {
+    docker compose run --rm rl-agent python src/baseline_eval.py `
+        --scenario $scen --output /data/results/baseline-$scen
 }
 ```
 
-### Chạy với cả 3 kịch bản
+Output: `data/results/baseline-<SCEN>/{k8s,random}/{metrics.csv, summary.json}` và `data/results/baseline_results.json` (so sánh).
 
-```bash
-for scen in LOW HIGH BURST; do
-    docker compose run --rm rl-agent python src/baseline_eval.py \
-        --scenario $scen --output /data/results/baseline-$scen
-done
-```
+### 4.4. Unit tests Python (offline, host)
 
----
-
-## 6. Chạy unit tests (offline, không cần Java)
-
-```bash
-# Trên máy host (không cần Docker)
+```powershell
 pip install numpy gymnasium pytest py4j wandb
 python -m pytest rl-agent/tests/ -v
 ```
 
-**Output mong đợi**:
-```
-============================= 96 passed in 1.14s ==============================
-```
-
 ---
 
-## 7. Default `train.py` (entry point của container)
+## 5. Monitoring stack (Phase 1.5, opt-in)
 
-Khi chạy `docker compose up rl-agent` (không override command), container sẽ chạy `python src/train.py`, mặc định bằng smoke test:
+### 5.1. Bật/tắt
+
+```powershell
+# Bật cả 3 container (cloudsim + prometheus + grafana)
+docker compose --profile monitoring up -d --build
+
+# Khởi động chỉ stack quan sát (cloudsim đã chạy sẵn)
+docker compose --profile monitoring up -d prometheus grafana
+
+# Tắt — chỉ container monitoring, giữ data
+docker compose --profile monitoring stop prometheus grafana
+
+# Tắt + xoá volume Prometheus/Grafana
+docker compose --profile monitoring down -v
+```
+
+### 5.2. URLs
+
+| Service              | Host URL                                          | Credentials      |
+|----------------------|---------------------------------------------------|------------------|
+| Java exporter        | http://localhost:9091/metrics                     | —                |
+| Prometheus           | http://localhost:9090                             | —                |
+| Grafana              | http://localhost:3000                             | `admin / admin`  |
+| Overview dashboard   | http://localhost:3000/d/eldas-live                | đã provisioned   |
+| Host detail (param.) | http://localhost:3000/d/eldas-host-detail         | đã provisioned   |
+| Scheduler comparison | http://localhost:3000/d/eldas-scheduler-comparison| đã provisioned   |
+
+Overview dùng **single-select** `$scenario` + `$scheduler` (chọn 1 run đang xem). Host-detail thêm biến `$host` (0–9) — chọn host nào sẽ drill xuống đó. Hai dashboard có link qua lại ở góc trên.
+
+### 5.3. Verify end-to-end
 
 ```bash
-docker compose up
+# Smoke test 13 check — Java exporter → Prometheus → Grafana proxy
+bash scripts/check-monitoring.sh
+
+# Override endpoint khi chạy từ container khác
+ELDAS_PROM_URL=http://prometheus:9090 \
+ELDAS_GRAFANA_URL=http://grafana:3000 \
+    bash scripts/check-monitoring.sh
 ```
 
-Cả 2 container khởi động, smoke test chạy tự động → bạn thấy ngay vòng RL có hoạt động không.
+### 5.4. Truy vấn nhanh
+
+```powershell
+# Liệt kê các metric ELDAS
+curl -s http://localhost:9091/metrics | Select-String '^eldas_'
+
+# PromQL trực tiếp
+curl -s "http://localhost:9090/api/v1/query?query=eldas_host_cpu_util"
+
+# Health datasource Grafana qua proxy
+$cred = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('admin:admin'))
+curl -s -H "Authorization: Basic $cred" `
+    http://localhost:3000/api/datasources/uid/eldas-prometheus/health
+```
 
 ---
 
-## 8. Quick reference — các lệnh hay dùng
+## 6. Scripts tiện ích
 
 ```bash
-# Build mọi thứ
-docker compose build
+# Tải Alibaba GPU Cluster Trace v2023 nếu thiếu data
+bash scripts/download-trace.sh
 
-# Khởi chạy stack (cả 2 container)
-docker compose up
+# Kiểm tra monitoring stack (mục §5.3)
+bash scripts/check-monitoring.sh
+```
 
-# Chỉ start Java service ở background
-docker compose up -d cloudsim-java
+```powershell
+# Pipeline thu thập số liệu cho báo cáo (smoke + 3 baseline + plots)
+pip install pandas numpy matplotlib   # cài 1 lần trên host
+python assets/report/scripts/collect_all_data.py     # ~15–30 phút
 
-# Smoke test
-docker compose run --rm rl-agent python src/smoke_test.py
-
-# Baseline evaluation
-docker compose run --rm rl-agent python src/baseline_eval.py --scenario HIGH
-
-# Mở shell trong rl-agent
-docker compose run --rm rl-agent bash
-
-# Xem log Java
-docker compose logs -f cloudsim-java
-
-# Dừng + xóa
-docker compose down
-
-# Dừng + xóa CẢ volume (data results sẽ mất!)
-docker compose down -v
-
-# Chạy unit tests trên host
-python -m pytest rl-agent/tests/ -v
+# Vẽ figures riêng (chạy sau khi đã có metrics.csv)
+python assets/report/scripts/plot_baseline.py
+python assets/report/scripts/plot_chapter5.py
+python assets/report/scripts/analyze-trace.py
 ```
 
 ---
 
-## 9. Các file output Java sinh ra
+## 7. Build báo cáo LaTeX
 
-| File | Sinh từ | Format | Nội dung |
-|---|---|---|---|
-| `/data/results/<run>/metrics.csv` | `MetricsExporter.writeCsv` | CSV | snapshot per task |
-| `/data/results/<run>/summary.json` | `MetricsExporter.writeJson` | JSON | aggregated summary |
-| `/data/results/baseline_results.json` | `baseline_eval.save_results` | JSON | so sánh các scheduler |
-
-Truy cập từ host (Docker volume `results`):
-
-```bash
-docker compose run --rm rl-agent ls -la /data/results/
+```powershell
+# Từ thư mục assets/report/
+.\build.ps1
+# Output: assets/report/out/main.pdf
 ```
 
 ---
 
-## 10. Bước tiếp theo (Phase 2)
+## 8. Output files Java tạo ra
 
-Sau khi smoke test pass + baseline eval chạy xong:
+| File                                         | Nguồn                          | Nội dung                       |
+|----------------------------------------------|--------------------------------|--------------------------------|
+| `/data/results/<run>/metrics.csv`            | `MetricsExporter.writeCsv`     | 1 dòng/snapshot                |
+| `/data/results/<run>/summary.json`           | `MetricsExporter.writeJson`    | tổng hợp episode               |
+| `/data/results/baseline_results.json`        | `baseline_eval.save_results`   | so sánh scheduler              |
+| `:9091/metrics` (chỉ khi `MONITORING_ENABLED=true`) | `MetricsRegistry`        | Prometheus text format         |
 
-1. **P2.1** — implement PPO + MaskablePPO training loop trong `train.py`
-2. **P2.2** — weight sweep: chạy 9 training runs với `ENERGY_WEIGHT` từ 0.1 → 0.9
-3. **P2.5** — vẽ Pareto front: energy vs SLA violation, so sánh MORL vs K8s vs Random
+Xem từ host: `docker compose run --rm rl-agent ls -la /data/results/`
 
-Xem thêm chi tiết trong [CLAUDE.md](../CLAUDE.md) → mục **Phase 2**.
+---
+
+## 9. Tài liệu phân tích & tracking (rải rác trong repo)
+
+Những file này KHÔNG phải hướng dẫn chạy — chúng là ghi chép phân tích, log validation, evidence. Liệt kê ở đây để không bị quên.
+
+| File                                                                                   | Mục đích                                                                                              |
+|----------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| [`assets/report/analyze-numbers.md`](../report/analyze-numbers.md)                     | Audit khách quan từng con số phase 1, đánh dấu anomaly (energy magnitude, SLA = 0, throughput, …)      |
+| [`assets/report/java-validation-report.md`](../report/java-validation-report.md)       | 10 bug Java (B1–B10) — định vị file:dòng, mức độ, trạng thái fix. Đầu vào cho `ValidationRunner`.     |
+| [`assets/report/TODO-evidence.md`](../report/TODO-evidence.md)                         | Quy trình 3 bước thu thập bằng chứng (screenshots + data) cho báo cáo Phase 1.                        |
+| [`assets/report/collect-all.log`](../report/collect-all.log)                           | Log output của `collect_all_data.py` lần chạy gần nhất (data version 2026-05-11).                     |
+| [`cloudsim-java/test/README.md`](../../cloudsim-java/test/README.md)                   | Mô tả từng test trong `ValidationRunner`. Lệnh chạy đã hợp nhất vào §4.1 ở đây.                       |
+
+Để thêm thông tin tổng quan: xem [`CLAUDE.md`](../../CLAUDE.md) (tiến độ + quyết định kỹ thuật) và [`README.md`](../../README.md) (giới thiệu + kiến trúc) ở root.
+
+---
+
+## 10. Quick reference — các lệnh dùng thường xuyên
+
+```powershell
+docker compose build                                                        # build core
+docker compose up                                                           # chạy core, foreground
+docker compose --profile monitoring up -d                                   # chạy core + monitoring
+docker compose run --rm rl-agent python src/smoke_test.py                   # smoke test
+docker compose run --rm rl-agent python src/baseline_eval.py --scenario HIGH # baseline
+docker compose run --rm --no-deps --entrypoint java cloudsim-java `
+    -cp simulation.jar sim.ValidationRunner                                  # Java tests
+bash scripts/check-monitoring.sh                                            # monitoring health
+docker compose logs -f cloudsim-java                                        # logs Java
+docker compose down                                                         # dừng (giữ data)
+docker compose down -v                                                      # dừng + xoá volume
+```

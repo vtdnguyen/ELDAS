@@ -7,6 +7,10 @@ services:
     container_name: cloudsim
     ports:
       - "${PY4J_PORT}:${PY4J_PORT}"
+      # T5.3 — Publish the Prometheus exporter so `curl localhost:9091/metrics`
+      # works from the host for ad-hoc debugging. Internally, Prometheus
+      # scrapes through the sim-net bridge regardless of this mapping.
+      - "${METRICS_PORT:-9091}:${METRICS_PORT:-9091}"
     volumes:
       # :ro = read-only, Java chỉ đọc data chứ không ghi
       - trace-data:/data/trace:ro
@@ -14,6 +18,10 @@ services:
     environment:
       - PY4J_PORT=${PY4J_PORT}
       - RANDOM_SEED=${RANDOM_SEED}
+      # T5.3 — Prometheus exporter (no-op unless MONITORING_ENABLED=true).
+      # Defaults below let the stack run unchanged when .env doesn't set them.
+      - MONITORING_ENABLED=${MONITORING_ENABLED:-false}
+      - METRICS_PORT=${METRICS_PORT:-9091}
     networks:
       - sim-net
     # Healthcheck: thử kết nối port Py4J mỗi 10 giây
@@ -49,6 +57,74 @@ services:
     networks:
       - sim-net
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # T5.1 — Observability stack (opt-in).
+  #
+  # Both services live under the `monitoring` profile, so they are SKIPPED
+  # by default. `docker compose up` boots only cloudsim-java + rl-agent.
+  # To boot the full stack:
+  #     docker compose --profile monitoring up
+  #
+  # Neither service is in any other service's `depends_on`. If monitoring
+  # fails to start, the simulation runs unaffected.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: eldas-prometheus
+    profiles: ["monitoring"]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=24h"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - sim-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/ready >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: eldas-grafana
+    profiles: ["monitoring"]
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      # Default credentials — override via .env for non-local use.
+      - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-admin}
+      # Disable anonymous + sign-up to keep things explicit even on localhost.
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # Skip the "set new password" wall the first time you log in.
+      - GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION=false
+    volumes:
+      # Provisioning: datasource + dashboard provider definitions.
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      # Persistent storage for users, prefs, edits.
+      - grafana-data:/var/lib/grafana
+    networks:
+      - sim-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
 volumes:
   # bind mount: map thư mục thật trên máy host vào container
   trace-data:
@@ -67,6 +143,10 @@ volumes:
       device: ./data/results   # ← maps to ELDAS/data/results/ on your host
   
   model-store:
+
+  # T5.1 — Persistent storage for the optional monitoring stack.
+  prometheus-data:
+  grafana-data:
 
 networks:
   sim-net:

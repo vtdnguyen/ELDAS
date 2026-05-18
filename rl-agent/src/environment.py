@@ -86,7 +86,7 @@ def _connect_gateway(
 class CloudSimEnv(gym.Env):
     """Gymnasium environment backed by CloudSim Plus via Py4J.
 
-    **Observation space**: ``Box(0, 1, shape=(3H+4,), float32)``
+    **Observation space**: ``Box(0, 1, shape=(6H+4,), float32)``
         H host-level features (CPU, MEM, GPU util) + 4 task features.
 
     **Action space**: ``Discrete(H)``
@@ -207,7 +207,7 @@ class CloudSimEnv(gym.Env):
 
         Returns
         -------
-        observation : np.ndarray  — shape ``(3H+4,)``
+        observation : np.ndarray  — shape ``(6H+4,)``
         reward : np.ndarray       — shape ``(2,)`` ``[R_energy, R_sla]``
         terminated : bool         — ``True`` when all tasks are scheduled
         truncated : bool          — always ``False`` (no time limit)

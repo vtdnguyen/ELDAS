@@ -70,37 +70,37 @@
 \thispagestyle{plain}
 
 \noindent
-Đồ án này là kết quả của một hành trình học tập, nghiên cứu và thực hành nghiêm túc trong
-suốt học kỳ vừa qua. Để hoàn thành công trình này, em đã nhận được sự hỗ trợ và
-đồng hành của thầy, của khoa mà em muốn bày tỏ lòng biết ơn sâu sắc.
+Đồ án này là kết quả của quá trình học tập và nghiên cứu của em trong học kỳ
+vừa qua. Để hoàn thành báo cáo, em đã nhận được nhiều sự hướng dẫn, hỗ trợ từ
+phía Thầy và Khoa, và em xin được gửi lời cảm ơn chân thành ở những trang đầu
+tiên này.
 
 \bigskip
 \noindent
-Trước tiên, em xin gửi lời cảm ơn chân thành nhất đến \textbf{Thầy Nguyễn Quang Hùng},
-người hướng dẫn đồ án của em. Thầy đã không chỉ định hướng vấn đề nghiên cứu và gợi
-mở các góc nhìn kỹ thuật quan trọng, mà còn kiên nhẫn theo sát tiến độ, cung cấp phản
-hồi kịp thời và khuyến khích em tư duy độc lập trước những thách thức kỹ thuật phức tạp.
-Sự tận tâm và chuyên môn sâu rộng của Thầy là nguồn động lực lớn trong suốt quá trình
-thực hiện đồ án.
+Trước hết, em xin cảm ơn \textbf{Thầy Nguyễn Quang Hùng} --- giảng viên hướng
+dẫn của em. Thầy đã giúp em định hình hướng nghiên cứu, gợi mở những góc nhìn
+kỹ thuật mà bản thân em khó tự nhận ra, đồng thời theo sát tiến độ và đưa ra
+phản hồi kịp thời ở từng giai đoạn. Những trao đổi với Thầy đã giúp em rèn
+luyện tư duy độc lập khi đối diện với các vấn đề kỹ thuật phức tạp.
 
 \bigskip
 \noindent
-Em xin cảm ơn \textbf{Khoa Khoa học và Kỹ thuật Máy tính}, Trường Đại học Bách Khoa
---- ĐHQG TP.HCM, đã tạo điều kiện môi trường học thuật và cơ sở hạ tầng nghiên cứu
-thuận lợi. Những kiến thức nền tảng về hệ thống phân tán, học máy và thiết kế phần mềm
-mà em tích lũy qua các học phần của Khoa là tiền đề không thể thiếu để xây dựng hệ thống
-này.
+Em cũng xin gửi lời cảm ơn đến \textbf{Khoa Khoa học và Kỹ thuật Máy tính},
+Trường Đại học Bách Khoa --- ĐHQG TP.\,HCM, vì môi trường học thuật và cơ sở
+vật chất nghiên cứu mà Khoa đã xây dựng. Phần kiến thức nền tảng về hệ thống
+phân tán, học máy và thiết kế phần mềm tích lũy qua các học phần của Khoa
+chính là cơ sở để em triển khai được hệ thống trong báo cáo này.
 
 \bigskip
 \noindent
-Em cũng bày tỏ lòng biết ơn đến \textbf{gia đình} đã luôn ủng hộ và tạo điều kiện tốt
-nhất để em tập trung vào việc học tập và nghiên cứu.
+Em xin cảm ơn \textbf{gia đình} đã luôn là chỗ dựa trong suốt quá trình em học
+tập và thực hiện đồ án.
 
 \bigskip
 \noindent
-Mặc dù đã nỗ lực hết sức, đồ án chắc chắn vẫn còn những thiếu sót. Em kính mong nhận
-được ý kiến đóng góp từ Hội đồng và Quý Thầy Cô để tiếp tục hoàn thiện trong giai đoạn
-tiếp theo.
+Dù đã cố gắng, đồ án chắc chắn còn nhiều điểm chưa hoàn thiện. Em rất mong
+nhận được góp ý từ Hội đồng và Quý Thầy Cô để có thể tiếp tục hoàn chỉnh ở
+giai đoạn sau.
 
 \vspace{1.5cm}
 \begin{flushright}
@@ -129,41 +129,45 @@ tiếp theo.
 
 \bigskip
 \noindent
-Sự bùng nổ của các mô hình AI quy mô lớn (LLM, Diffusion Model) đặt ra áp lực chưa
-từng có lên hạ tầng datacenter: lượng tác vụ GPU ngày càng đa dạng về yêu cầu tài nguyên
-và ràng buộc thời gian, trong khi hai mục tiêu vận hành cốt lõi --- \textit{tiết kiệm năng
-lượng} và \textit{đảm bảo Chất lượng Dịch vụ (SLA)} --- liên tục mâu thuẫn nhau. Các
-thuật toán lập lịch truyền thống (First-Fit, Kubernetes Default) tối ưu hóa đơn mục tiêu,
-không nắm bắt được sự đánh đổi (trade-off) phức tạp giữa hai chiều này.
+Sự phát triển nhanh của các mô hình AI quy mô lớn (LLM, Diffusion Model) đang
+đặt hạ tầng datacenter trước áp lực chưa từng có: khối lượng tác vụ GPU vừa
+tăng nhanh về số lượng, vừa đa dạng về yêu cầu tài nguyên và ràng buộc thời
+gian. Trong khi đó, hai mục tiêu vận hành cốt lõi --- \textit{tiết kiệm năng
+lượng} và \textit{đảm bảo Chất lượng Dịch vụ (SLA)} --- thường xuyên xung đột
+với nhau. Các bộ lập lịch truyền thống như First-Fit hay Kubernetes Default chỉ
+tối ưu một mục tiêu duy nhất, do đó không phản ánh được sự đánh đổi
+(\textit{trade-off}) giữa hai chiều này.
 
 \bigskip
 \noindent
-Đồ án này đề xuất và hiện thực \textbf{ELDAS} (\textit{Energy-aware Learning-based
-Datacenter Auto-Scheduler}), một nền tảng mô phỏng và lập lịch tự động dựa trên
-\textbf{Học Tăng Cường Đa Mục Tiêu (MORL)}. Hệ thống được xây dựng theo kiến trúc
-4 lớp: (1)~hạ tầng Docker Compose tái sản xuất được, (2)~engine mô phỏng datacenter
-CloudSim Plus với mô hình năng lượng tuyến tính và theo dõi GPU, (3)~cầu nối RPC
-Java--Python qua Py4J, và (4)~môi trường học tăng cường MO-Gymnasium tích hợp
-agent PPO với che mặt hành động (Action Masking).
+Trên cơ sở đó, đồ án đề xuất và xây dựng \textbf{ELDAS} (\textit{Energy-aware
+Learning-based Datacenter Auto-Scheduler}) --- một nền tảng mô phỏng và lập
+lịch tự động dựa trên \textbf{Học Tăng Cường Đa Mục Tiêu (MORL)}. Hệ thống
+được tổ chức theo bốn lớp: (1)~hạ tầng Docker Compose cho phép tái lập kết
+quả, (2)~bộ mô phỏng datacenter CloudSim Plus có theo dõi GPU và mô hình năng
+lượng tuyến tính, (3)~cầu nối RPC giữa Java và Python qua Py4J, và (4)~môi
+trường học tăng cường MO-Gymnasium tích hợp agent PPO với Action Masking.
 
 \bigskip
 \noindent
-Tác vụ đầu vào được lấy từ \textbf{Alibaba GPU Cluster Trace v2023} --- bộ dữ liệu
-workload thực của trung tâm dữ liệu sản xuất với hơn 6.000 pod --- được phân thành
-ba kịch bản: Low Load, High Load và Burst. Vector phần thưởng hai chiều
-$\mathbf{r} = (R_\text{energy},\, R_\text{SLA})$ phản ánh trực tiếp hai mục tiêu xung
-đột, trong đó mức phạt SLA được điều chỉnh theo lớp QoS của tác vụ
-($\lambda \in \{1.0,\, 3.0\}$). Chiến lược \textit{linear scalarization} kết hợp quét
-trọng số $w \in [0.1,\, 0.9]$ cho phép xây dựng \textbf{Pareto front} thể hiện toàn bộ
-tập giải pháp tối ưu trade-off.
+Dữ liệu đầu vào được lấy từ \textbf{Alibaba GPU Cluster Trace v2023} --- bộ
+trace workload thực với hơn 6.000 pod --- và được tách thành ba kịch bản:
+Low Load, High Load và Burst. Tín hiệu thưởng giữ dạng vector hai chiều
+$\mathbf{r} = (R_\text{energy},\, R_\text{SLA})$, trong đó hệ số phạt SLA được
+điều chỉnh theo lớp QoS của tác vụ ($\lambda \in \{1{,}0;\, 3{,}0\}$). Để
+xấp xỉ Pareto front, đồ án dùng chiến lược \textit{linear scalarization} kết
+hợp với việc quét trọng số $w \in [0{,}1;\, 0{,}9]$.
 
 \bigskip
 \noindent
-Giai đoạn 1 của đồ án đã hoàn thành toàn bộ nền tảng kỹ thuật: môi trường mô phỏng
-được xác minh qua vòng lặp RL đầu đến cuối (reset $\to$ step $\to$ reward $\to$ done),
-hai baseline scheduler (Random và K8s Default) được tích hợp để so sánh. Giai đoạn 2
-(kế hoạch) sẽ tiến hành huấn luyện agent PPO+MLP, thực hiện weight sweep, và so sánh
-MORL với baseline trên cả ba kịch bản tải.
+Giai đoạn 1 đã hoàn tất toàn bộ nền tảng kỹ thuật. Vòng lặp RL được kiểm
+chứng đầu cuối (reset $\to$ step $\to$ reward $\to$ done); năm bộ lập lịch
+baseline cổ điển (FirstFit, BestFit, RoundRobin, Kubernetes LRP, Random) cùng
+một agent MORL PPO tối thiểu (MaskablePPO, $100$k step) đã được tích hợp,
+tạo thành ba cụm Pareto rõ rệt để làm mốc tham chiếu. Giai đoạn 2 sẽ tập
+trung vào tinh chỉnh siêu tham số, quét trọng số, đối chuẩn với hai thuật
+toán MORL hiện đại, song song với việc tối ưu hiệu năng hệ thống và bổ sung
+giao diện quản lý.
 
 \bigskip
 \noindent
@@ -172,69 +176,69 @@ năng lượng, SLA, CloudSim Plus, MO-Gymnasium, PPO, Alibaba Trace.
 
 \newpage
 
-% ── ABSTRACT (English) ───────────────────────────────────
-\chapter*{Abstract}
-\addcontentsline{toc}{chapter}{Abstract}
-\thispagestyle{plain}
+% % ── ABSTRACT (English) ───────────────────────────────────
+% \chapter*{Abstract}
+% \addcontentsline{toc}{chapter}{Abstract}
+% \thispagestyle{plain}
 
-\noindent
-\textbf{Thesis title:} Resource Allocation Scheduling in Datacenters using Multi-Objective
-Reinforcement Learning
+% \noindent
+% \textbf{Thesis title:} Resource Allocation Scheduling in Datacenters using Multi-Objective
+% Reinforcement Learning
 
-\medskip
-\noindent
-\textbf{Student:} Vu Tran Duy Nguyen --- ID: 2212338
+% \medskip
+% \noindent
+% \textbf{Student:} Vu Tran Duy Nguyen --- ID: 2212338
 
-\medskip
-\noindent
-\textbf{Supervisor:} Nguyen Quang Hung
+% \medskip
+% \noindent
+% \textbf{Supervisor:} Nguyen Quang Hung
 
-\bigskip
-\noindent
-The rapid proliferation of large-scale AI workloads --- including Large Language Models and
-Diffusion Models --- has placed unprecedented demands on modern datacenter infrastructure.
-GPU tasks arrive continuously with heterogeneous resource requirements and tight timing
-constraints, while two core operational objectives persistently conflict: \textit{energy
-efficiency} and \textit{Quality-of-Service (SLA) compliance}. Conventional single-objective
-schedulers such as Kubernetes Default or First-Fit Decreasing cannot capture the complex
-Pareto trade-off between these competing dimensions.
+% \bigskip
+% \noindent
+% The rapid proliferation of large-scale AI workloads --- including Large Language Models and
+% Diffusion Models --- has placed unprecedented demands on modern datacenter infrastructure.
+% GPU tasks arrive continuously with heterogeneous resource requirements and tight timing
+% constraints, while two core operational objectives persistently conflict: \textit{energy
+% efficiency} and \textit{Quality-of-Service (SLA) compliance}. Conventional single-objective
+% schedulers such as Kubernetes Default or First-Fit Decreasing cannot capture the complex
+% Pareto trade-off between these competing dimensions.
 
-\bigskip
-\noindent
-This thesis proposes and implements \textbf{ELDAS} (\textit{Energy-aware Learning-based
-Datacenter Auto-Scheduler}), a simulation and scheduling platform grounded in
-\textbf{Multi-Objective Reinforcement Learning (MORL)}. The system follows a four-layer
-architecture: (1)~a fully reproducible Docker Compose infrastructure, (2)~a CloudSim Plus
-datacenter simulation engine equipped with a linear power model and custom GPU tracking,
-(3)~a Java--Python RPC bridge via Py4J enabling low-latency inter-process communication,
-and (4)~a MO-Gymnasium reinforcement learning environment integrated with a
-Maskable-PPO agent from Stable-Baselines3-Contrib.
+% \bigskip
+% \noindent
+% This thesis proposes and implements \textbf{ELDAS} (\textit{Energy-aware Learning-based
+% Datacenter Auto-Scheduler}), a simulation and scheduling platform grounded in
+% \textbf{Multi-Objective Reinforcement Learning (MORL)}. The system follows a four-layer
+% architecture: (1)~a fully reproducible Docker Compose infrastructure, (2)~a CloudSim Plus
+% datacenter simulation engine equipped with a linear power model and custom GPU tracking,
+% (3)~a Java--Python RPC bridge via Py4J enabling low-latency inter-process communication,
+% and (4)~a MO-Gymnasium reinforcement learning environment integrated with a
+% Maskable-PPO agent from Stable-Baselines3-Contrib.
 
-\bigskip
-\noindent
-Input workloads are sourced from the \textbf{Alibaba GPU Cluster Trace v2023}, a real
-production trace comprising over 6,000 pod records, partitioned into three evaluation
-scenarios: Low Load, High Load, and Burst. The reward signal is a two-dimensional vector
-$\mathbf{r} = (R_\text{energy},\, R_\text{SLA})$ that directly captures both objectives;
-per-task SLA penalties are scaled by a QoS-tier factor $\lambda \in \{1.0,\, 3.0\}$ to
-reflect the urgency of latency-sensitive versus burstable jobs. A \textit{linear
-scalarization} strategy with a weight sweep $w \in [0.1,\, 0.9]$ is employed to generate
-the full \textbf{Pareto front} of energy--SLA trade-off solutions.
+% \bigskip
+% \noindent
+% Input workloads are sourced from the \textbf{Alibaba GPU Cluster Trace v2023}, a real
+% production trace comprising over 6,000 pod records, partitioned into three evaluation
+% scenarios: Low Load, High Load, and Burst. The reward signal is a two-dimensional vector
+% $\mathbf{r} = (R_\text{energy},\, R_\text{SLA})$ that directly captures both objectives;
+% per-task SLA penalties are scaled by a QoS-tier factor $\lambda \in \{1.0,\, 3.0\}$ to
+% reflect the urgency of latency-sensitive versus burstable jobs. A \textit{linear
+% scalarization} strategy with a weight sweep $w \in [0.1,\, 0.9]$ is employed to generate
+% the full \textbf{Pareto front} of energy--SLA trade-off solutions.
 
-\bigskip
-\noindent
-Phase~1 of the project delivers a complete, verified simulation stack: the end-to-end RL
-loop (reset $\to$ step $\to$ reward $\to$ done) passes a smoke test over Py4J, and two
-baseline schedulers (Random and K8s Default) are integrated for controlled comparison.
-Phase~2 (planned) will train the PPO+MLP agent, perform the weight sweep, and benchmark
-MORL against baselines across all three workload scenarios, culminating in a quantitative
-Pareto front and energy/makespan/SLA-violation comparison table.
+% \bigskip
+% \noindent
+% Phase~1 of the project delivers a complete, verified simulation stack: the end-to-end RL
+% loop (reset $\to$ step $\to$ reward $\to$ done) passes a smoke test over Py4J, and two
+% baseline schedulers (Random and K8s Default) are integrated for controlled comparison.
+% Phase~2 (planned) will train the PPO+MLP agent, perform the weight sweep, and benchmark
+% MORL against baselines across all three workload scenarios, culminating in a quantitative
+% Pareto front and energy/makespan/SLA-violation comparison table.
 
-\bigskip
-\noindent
-\textbf{Keywords:} multi-objective reinforcement learning, datacenter task scheduling,
-energy optimization, SLA compliance, CloudSim Plus, MO-Gymnasium, Proximal Policy
-Optimization, Alibaba Cluster Trace.
+% \bigskip
+% \noindent
+% \textbf{Keywords:} multi-objective reinforcement learning, datacenter task scheduling,
+% energy optimization, SLA compliance, CloudSim Plus, MO-Gymnasium, Proximal Policy
+% Optimization, Alibaba Cluster Trace.
 
 % ── MỤC LỤC ──────────────────────────────────────────────
 \tableofcontents

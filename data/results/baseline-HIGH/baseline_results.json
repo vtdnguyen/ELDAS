@@ -1,24 +1,70 @@
 {
-  "k8s": {
-    "scheduler": "k8s",
+  "roundrobin": {
+    "scheduler": "roundrobin",
     "scenario": "HIGH",
     "seed": 42,
     "steps": 7255,
-    "total_energy_reward": -20227868.75,
-    "total_sla_reward": 0.0,
-    "mean_energy_reward": -2788.128015161957,
-    "mean_sla_reward": 0.0,
-    "total_energy_kwh": 40689.33188298611
+    "total_energy_reward": -11864236.875,
+    "total_sla_reward": -61475285.835354194,
+    "mean_energy_reward": -1635.3186595451414,
+    "mean_sla_reward": -8473.505973170806,
+    "total_energy_kwh": 27368.767511805556
   },
   "random": {
     "scheduler": "random",
     "scenario": "HIGH",
     "seed": 42,
     "steps": 7255,
-    "total_energy_reward": -20222877.5,
-    "total_sla_reward": 0.0,
-    "mean_energy_reward": -2787.4400413507924,
-    "mean_sla_reward": 0.0,
-    "total_energy_kwh": 41323.586480555554
+    "total_energy_reward": -11867040.625,
+    "total_sla_reward": -85836182.80229461,
+    "mean_energy_reward": -1635.705117160579,
+    "mean_sla_reward": -11831.313963100567,
+    "total_energy_kwh": 25671.893877083334
+  },
+  "k8s": {
+    "scheduler": "k8s",
+    "scenario": "HIGH",
+    "seed": 42,
+    "steps": 7255,
+    "total_energy_reward": -11798466.875,
+    "total_sla_reward": -50297164.80584812,
+    "mean_energy_reward": -1626.2531874569263,
+    "mean_sla_reward": -6932.758760282305,
+    "total_energy_kwh": 27349.52078298611
+  },
+  "firstfit": {
+    "scheduler": "firstfit",
+    "scenario": "HIGH",
+    "seed": 42,
+    "steps": 7255,
+    "total_energy_reward": -13060605.0,
+    "total_sla_reward": -189707681.72367612,
+    "mean_energy_reward": -1800.2212267401792,
+    "mean_sla_reward": -26148.543311326826,
+    "total_energy_kwh": 21910.222119444443
+  },
+  "bestfit": {
+    "scheduler": "bestfit",
+    "scenario": "HIGH",
+    "seed": 42,
+    "steps": 7255,
+    "total_energy_reward": -13607580.625,
+    "total_sla_reward": -188040724.80852163,
+    "mean_energy_reward": -1875.6141454169538,
+    "mean_sla_reward": -25918.776679327584,
+    "total_energy_kwh": 21816.673898090277
+  },
+  "ppo-min": {
+    "scheduler": "ppo-min",
+    "scenario": "HIGH",
+    "seed": 42,
+    "steps": 7255,
+    "total_energy_reward": -11677136.875,
+    "total_sla_reward": -65989190.51749635,
+    "total_energy_kwh": 25423.81772152778,
+    "weights": [
+      0.5,
+      0.5
+    ]
   }
 }

@@ -1,11 +1,16 @@
 {
-  "total_energy_kwh":     31784.170610,
-  "cpu_energy_kwh":       6121.602343,
-  "gpu_energy_kwh":       25662.568267,
+  "total_energy_kwh":     3330.581337,
+  "cpu_energy_kwh":       1024.296378,
+  "gpu_energy_kwh":       2306.284958,
   "total_tasks":          3569,
-  "sla_violations":       0,
-  "sla_violation_rate":   0.0000,
-  "avg_cpu_utilization":  26.6672,
-  "avg_gpu_utilization":  0.9873,
-  "makespan_sec":         12876895.0
+  "sla_violations":       576,
+  "sla_violation_rate":   0.1614,
+  "avg_cpu_utilization":  0.1755,
+  "avg_gpu_utilization":  0.1378,
+  "makespan_sec":         12902965.0,
+  "total_wakeups":        1890,
+  "wake_energy_kwh":      0.945000,
+  "avg_active_hosts":     8.7943,
+  "avg_idle_hosts":       0.0510,
+  "avg_suspended_hosts":  1.1547
 }

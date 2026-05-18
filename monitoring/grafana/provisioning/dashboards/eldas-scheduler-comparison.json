@@ -1,0 +1,247 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Scheduler snapshot — current values per (scenario, scheduler)",
+      "description": "One row per active context. Lower energy + lower SLA violations = closer to Pareto front.",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {
+          "refId": "energy",
+          "expr": "eldas_total_energy_kwh",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "scheduled",
+          "expr": "eldas_tasks_scheduled_total",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "pending",
+          "expr": "eldas_pending_tasks",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "sla",
+          "expr": "sum by (scenario, scheduler) (eldas_sla_violations_total)",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {"byField": "scheduler", "mode": "outer"}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true,
+              "__name__ 1": true, "__name__ 2": true, "__name__ 3": true,
+              "instance 1": true, "instance 2": true, "instance 3": true, "instance 4": true,
+              "job 1": true, "job 2": true, "job 3": true, "job 4": true,
+              "source 1": true, "source 2": true, "source 3": true, "source 4": true,
+              "scenario 2": true, "scenario 3": true, "scenario 4": true
+            },
+            "renameByName": {
+              "scenario 1": "scenario",
+              "Value #energy": "energy (kWh)",
+              "Value #scheduled": "scheduled (cum.)",
+              "Value #pending": "pending",
+              "Value #sla": "SLA violations (cum.)"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"align": "auto", "displayMode": "auto"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "energy (kWh)"},
+            "properties": [
+              {"id": "custom.displayMode", "value": "gradient-gauge"},
+              {"id": "color", "value": {"mode": "continuous-GrYlRd"}},
+              {"id": "decimals", "value": 3}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "SLA violations (cum.)"},
+            "properties": [
+              {"id": "custom.displayMode", "value": "gradient-gauge"},
+              {"id": "color", "value": {"mode": "continuous-GrYlRd"}}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "scheduler", "desc": false}]
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Total energy over time — by scheduler",
+      "description": "Steeper slope = more energy spent per second of simulation. Compare runs of the same scenario.",
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (scheduler) (eldas_total_energy_kwh)",
+          "legendFormat": "{{scheduler}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 3,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"], "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "SLA violations rate — by scheduler",
+      "description": "Higher line = scheduler letting more deadlines slip.",
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (scheduler) (rate(eldas_sla_violations_total[1m]))",
+          "legendFormat": "{{scheduler}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "right", "calcs": ["sum", "lastNotNull"], "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 4,
+      "type": "bargauge",
+      "title": "Cluster CPU spread (stddev across hosts) — lower = more even",
+      "description": "K8s default minimises this number (its priority is LeastRequestedPriority). Random/MORL-energy will have a HIGHER stddev because they cluster tasks onto fewer hosts.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "stddev by (scheduler) (eldas_host_cpu_util)",
+          "legendFormat": "{{scheduler}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 0.5,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green",  "value": null},
+              {"color": "orange", "value": 0.1},
+              {"color": "red",    "value": 0.25}
+            ]
+          }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 5,
+      "type": "bargauge",
+      "title": "Mean cluster utilisation — by scheduler",
+      "description": "Same workload, different schedulers → utilisation can differ if some schedulers leave hosts idle while others pack them.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (scheduler) (eldas_host_cpu_util)",
+          "legendFormat": "{{scheduler}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "blue",   "value": null},
+              {"color": "green",  "value": 0.3},
+              {"color": "orange", "value": 0.7},
+              {"color": "red",    "value": 0.9}
+            ]
+          }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "showUnfilled": true
+      }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "tags": ["eldas", "comparison", "pareto"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "ELDAS Scheduler Comparison",
+  "uid": "eldas-scheduler-comparison",
+  "version": 1,
+  "weekStart": ""
+}

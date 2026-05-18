@@ -92,8 +92,8 @@ def test_connection(env: CloudSimEnv) -> None:
     _assert(env._num_hosts > 0, f"Got {env._num_hosts} hosts from Java")
     _assert(env.action_space.n == env._num_hosts,
             f"Action space size = num hosts ({env._num_hosts})")
-    _assert(env.observation_space.shape == (3 * env._num_hosts + 4,),
-            f"Observation shape = (3H+4,) = ({3 * env._num_hosts + 4},)")
+    _assert(env.observation_space.shape == (6 * env._num_hosts + 4,),
+            f"Observation shape = (6H+4,) = ({6 * env._num_hosts + 4},)")
 
 
 def test_reset(env: CloudSimEnv) -> np.ndarray:
@@ -101,7 +101,7 @@ def test_reset(env: CloudSimEnv) -> np.ndarray:
     _section("Phase 2: Reset")
     obs, info = env.reset()
 
-    _assert(obs.shape == (3 * env._num_hosts + 4,),
+    _assert(obs.shape == (6 * env._num_hosts + 4,),
             f"Observation has correct shape {obs.shape}")
     _assert(obs.dtype == np.float32, "Observation dtype is float32")
     _assert(env.observation_space.contains(obs),
@@ -142,7 +142,7 @@ def test_single_step(env: CloudSimEnv, mask: np.ndarray) -> None:
 
     obs, reward, terminated, truncated, info = env.step(action)
 
-    _assert(obs.shape == (3 * env._num_hosts + 4,),
+    _assert(obs.shape == (6 * env._num_hosts + 4,),
             "Step obs has correct shape")
     _assert(env.observation_space.contains(obs),
             "Step obs is in space")

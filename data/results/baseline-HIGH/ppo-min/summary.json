@@ -1,0 +1,16 @@
+{
+  "total_energy_kwh":     25423.817722,
+  "cpu_energy_kwh":       5638.413505,
+  "gpu_energy_kwh":       19785.404217,
+  "total_tasks":          7255,
+  "sla_violations":       4166,
+  "sla_violation_rate":   0.5742,
+  "avg_cpu_utilization":  0.6712,
+  "avg_gpu_utilization":  0.4566,
+  "makespan_sec":         12902965.0,
+  "total_wakeups":        30,
+  "wake_energy_kwh":      0.015000,
+  "avg_active_hosts":     9.9846,
+  "avg_idle_hosts":       0.0026,
+  "avg_suspended_hosts":  0.0128
+}
