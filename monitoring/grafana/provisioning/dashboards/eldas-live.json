@@ -1,6 +1,6 @@
 {
   "annotations": {"list": []},
-  "description": "ELDAS Live overview — pick one (scenario, scheduler) tuple to see the current run. Click 'Host detail' link to drill into a specific host.",
+  "description": "ELDAS Live overview — pick one (scenario, scheduler) tuple to see the current run. Scales to any NUM_HOSTS: no panel hardcodes a host count, and per-host rows carry their own labels so legends stay off. Note: host_id sorts lexicographically (0,1,10,11,2,…) above 10 hosts — Prometheus 2.x has no numeric label sort. Click 'Host detail' to drill into one host.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -27,15 +27,13 @@
     {
       "id": 1, "type": "stat",
       "title": "Total energy (kWh)",
+      "description": "Episode-cumulative, reset each resetSimulation(). Deliberately has NO absolute colour thresholds: episode energy runs to 10^4 kWh and depends on scenario and host count, so any fixed red line is wrong. Judge it against the other schedulers in the Comparison dashboard, not against a constant.",
       "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A", "expr": "eldas_total_energy_kwh{scenario=\"$scenario\", scheduler=\"$scheduler\"}"}],
-      "fieldConfig": {"defaults": {"unit": "none", "decimals": 3,
-        "thresholds": {"mode": "absolute", "steps": [
-          {"color": "green", "value": null},
-          {"color": "orange", "value": 0.5},
-          {"color": "red", "value": 1.0}]}}},
-      "options": {"colorMode": "background", "graphMode": "area", "textMode": "auto",
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 1,
+        "color": {"mode": "fixed", "fixedColor": "text"}}},
+      "options": {"colorMode": "none", "graphMode": "area", "textMode": "auto",
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
     },
     {
@@ -65,13 +63,18 @@
     },
     {
       "id": 4, "type": "stat",
-      "title": "Schedule rate (tasks/s)",
+      "title": "Hosts suspended",
+      "description": "Hosts powered down past IDLE_THRESHOLD_SEC. This is where the energy saving actually comes from (Phase 1.8 gradient) — if it stays at 0 the scheduler is spreading load and the gradient is flat.",
       "gridPos": {"h": 4, "w": 4, "x": 12, "y": 1},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
-        "expr": "sum(rate(eldas_tasks_scheduled_total{scenario=\"$scenario\", scheduler=\"$scheduler\"}[30s]))"}],
-      "fieldConfig": {"defaults": {"unit": "none", "decimals": 2}},
-      "options": {"colorMode": "value", "graphMode": "area",
+        "expr": "eldas_host_state_count{state=\"suspended\", scenario=\"$scenario\", scheduler=\"$scheduler\"} / ignoring(state) group_left sum without (state) (eldas_host_state_count{scenario=\"$scenario\", scheduler=\"$scheduler\"})"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "decimals": 0, "min": 0, "max": 1,
+        "thresholds": {"mode": "absolute", "steps": [
+          {"color": "red", "value": null},
+          {"color": "orange", "value": 0.1},
+          {"color": "green", "value": 0.3}]}}},
+      "options": {"colorMode": "background", "graphMode": "area",
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
     },
     {
@@ -91,32 +94,33 @@
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
     },
     {
-      "id": 6, "type": "gauge",
-      "title": "Sim clock (s)",
+      "id": 6, "type": "stat",
+      "title": "Sim clock",
+      "description": "Simulated seconds, NOT wall-clock. Report figures must come from metrics.csv / WandB in sim-time, never from Grafana's wall-time axis (Lưu ý #16).",
       "gridPos": {"h": 4, "w": 4, "x": 20, "y": 1},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
         "expr": "eldas_sim_clock_seconds{scenario=\"$scenario\", scheduler=\"$scheduler\"}"}],
       "fieldConfig": {"defaults": {"unit": "s", "decimals": 0}},
-      "options": {"showThresholdLabels": false, "showThresholdMarkers": false,
+      "options": {"colorMode": "none", "graphMode": "area", "textMode": "auto",
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
     },
 
     {
       "id": 200, "type": "row",
-      "title": "Per-host heatmap — spread vs pack signature",
+      "title": "Per-host timeline — spread vs pack signature",
       "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
       "collapsed": false, "panels": []
     },
     {
       "id": 10, "type": "state-timeline",
-      "title": "Host CPU utilisation (10 rows — one per host)",
-      "description": "Uses 'max by (host_id)' to collapse to one row per host regardless of how many (scenario, scheduler) tuples Prometheus has cached. Single-select filters keep only the active run.",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 6},
+      "title": "Host CPU utilisation — one row per host",
+      "description": "'max by (host_id)' collapses to one row per host regardless of how many cached (scenario, scheduler) tuples exist. Row labels carry the host id, so the legend is off — that is what keeps this readable at 50 hosts.",
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 6},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
         "expr": "max by (host_id) (eldas_host_cpu_util{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
-        "legendFormat": "host {{host_id}}"}],
+        "legendFormat": "h{{host_id}}"}],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1,
         "custom": {"lineWidth": 0, "fillOpacity": 90},
         "thresholds": {"mode": "absolute", "steps": [
@@ -127,18 +131,37 @@
           {"color": "#ff7f00", "value": 0.80},
           {"color": "#e31a1c", "value": 0.95}]},
         "color": {"mode": "thresholds"}}},
-      "options": {"mergeValues": false, "showValue": "never", "alignValue": "left", "rowHeight": 0.9,
-        "legend": {"displayMode": "list", "placement": "right", "showLegend": true},
+      "options": {"mergeValues": false, "showValue": "never", "alignValue": "left", "rowHeight": 0.92,
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": false},
         "tooltip": {"mode": "single", "sort": "none"}}
     },
     {
       "id": 11, "type": "state-timeline",
+      "title": "Host power state — 0=SUSPENDED, 1=IDLE, 2=ACTIVE",
+      "description": "The suspend/wake machine that creates the energy gradient (Lưu ý #12). Long blue stretches = hosts genuinely powered down. Rapid blue↔green flapping = wake thrashing, which costs WAKE_ENERGY_KWH every transition.",
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 15},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A",
+        "expr": "max by (host_id) (eldas_host_state{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
+        "legendFormat": "h{{host_id}}"}],
+      "fieldConfig": {"defaults": {"unit": "none",
+        "custom": {"lineWidth": 0, "fillOpacity": 90},
+        "mappings": [{"type": "value", "options": {
+          "0": {"text": "SUSPENDED", "color": "dark-blue", "index": 0},
+          "1": {"text": "IDLE",      "color": "orange",    "index": 1},
+          "2": {"text": "ACTIVE",    "color": "green",     "index": 2}}}]}},
+      "options": {"mergeValues": true, "showValue": "never", "alignValue": "left", "rowHeight": 0.92,
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": false},
+        "tooltip": {"mode": "single", "sort": "none"}}
+    },
+    {
+      "id": 12, "type": "state-timeline",
       "title": "Host GPU utilisation",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 14},
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 24},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
         "expr": "max by (host_id) (eldas_host_gpu_util{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
-        "legendFormat": "host {{host_id}}"}],
+        "legendFormat": "h{{host_id}}"}],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1,
         "custom": {"lineWidth": 0, "fillOpacity": 90},
         "thresholds": {"mode": "absolute", "steps": [
@@ -149,26 +172,28 @@
           {"color": "#ff7f00", "value": 0.75},
           {"color": "#e31a1c", "value": 0.95}]},
         "color": {"mode": "thresholds"}}},
-      "options": {"mergeValues": false, "showValue": "never", "rowHeight": 0.9,
-        "legend": {"displayMode": "list", "placement": "right", "showLegend": true},
+      "options": {"mergeValues": false, "showValue": "never", "rowHeight": 0.92,
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": false},
         "tooltip": {"mode": "single"}}
     },
 
     {
       "id": 300, "type": "row",
       "title": "Power, queue & SLA breakdown",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 22},
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 33},
       "collapsed": false, "panels": []
     },
     {
       "id": 20, "type": "timeseries",
-      "title": "Per-host power draw (stacked, W)",
-      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 23},
+      "title": "Cluster power draw by SKU (stacked, W)",
+      "description": "Grouped by hardware class rather than by host: the series count stays at the number of SKUs (1 when homogeneous, 3 for topology-hetero.json) no matter how many hosts run, so this panel is readable at 10 and at 50 hosts. Per-host power lives in the Host detail dashboard.",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 34},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
-        "expr": "max by (host_id) (eldas_host_power_watt{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
-        "legendFormat": "host {{host_id}}"}],
-      "fieldConfig": {"defaults": {"unit": "watt",
+        "expr": "sum by (sku) (max by (host_id, sku) (eldas_host_power_watt{scenario=\"$scenario\", scheduler=\"$scheduler\"}))",
+        "legendFormat": "{{sku}}"}],
+      "fieldConfig": {"defaults": {"unit": "watt", "decimals": 0,
+        "color": {"mode": "palette-classic"},
         "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 35,
           "stacking": {"mode": "normal", "group": "A"},
           "showPoints": "never", "gradientMode": "opacity"}}},
@@ -179,7 +204,7 @@
     {
       "id": 21, "type": "timeseries",
       "title": "Pending queue vs scheduled rate",
-      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 23},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 34},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [
         {"refId": "A", "expr": "eldas_pending_tasks{scenario=\"$scenario\", scheduler=\"$scheduler\"}",
@@ -196,9 +221,47 @@
         "tooltip": {"mode": "multi"}}
     },
     {
+      "id": 22, "type": "timeseries",
+      "title": "Host states over time (stacked count)",
+      "description": "Total height = host count, so this panel self-scales with NUM_HOSTS. A healthy energy-seeking policy grows the suspended band.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 43},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A",
+        "expr": "eldas_host_state_count{scenario=\"$scenario\", scheduler=\"$scheduler\"}",
+        "legendFormat": "{{state}}"}],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 0,
+        "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 45,
+          "stacking": {"mode": "normal", "group": "A"},
+          "showPoints": "never"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "suspended"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-blue"}}]},
+          {"matcher": {"id": "byName", "options": "idle"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]},
+          {"matcher": {"id": "byName", "options": "active"},
+           "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]}]},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}}
+    },
+    {
+      "id": 23, "type": "timeseries",
+      "title": "Wake-ups per minute",
+      "description": "Each SUSPENDED→ACTIVE transition costs WAKE_ENERGY_KWH plus WAKE_LATENCY_SEC of added tardiness — the exact tension the agent has to resolve.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 43},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A",
+        "expr": "sum(increase(eldas_total_wakeups_total{scenario=\"$scenario\", scheduler=\"$scheduler\"}[1m]))",
+        "legendFormat": "wake-ups/min"}],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 1,
+        "custom": {"drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60, "showPoints": "never"}}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": false},
+        "tooltip": {"mode": "single"}}
+    },
+    {
       "id": 30, "type": "timeseries",
       "title": "SLA violations rate by QoS",
-      "gridPos": {"h": 9, "w": 16, "x": 0, "y": 32},
+      "description": "QoS classes carry different κ weights (BE .5 / Burstable 1 / Guaranteed 2 / LS 3), so a violation on LS costs 6× one on BE in C_SLA.",
+      "gridPos": {"h": 9, "w": 16, "x": 0, "y": 51},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
         "expr": "sum by (qos) (rate(eldas_sla_violations_total{scenario=\"$scenario\", scheduler=\"$scheduler\"}[30s]))",
@@ -212,7 +275,7 @@
     {
       "id": 31, "type": "piechart",
       "title": "SLA violation share by QoS",
-      "gridPos": {"h": 9, "w": 8, "x": 16, "y": 32},
+      "gridPos": {"h": 9, "w": 8, "x": 16, "y": 51},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
         "expr": "sum by (qos) (eldas_sla_violations_total{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
@@ -253,6 +316,6 @@
   "timezone": "",
   "title": "ELDAS Live — Overview",
   "uid": "eldas-live",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }

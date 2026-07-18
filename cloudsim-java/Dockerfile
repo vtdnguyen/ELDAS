@@ -1,3 +1,6 @@
+# syntax=docker/dockerfile:1
+# (Dòng syntax trên BẮT BUỘC để dùng `RUN --mount=type=cache` bên dưới.)
+
 # ─────────────────────────────────────────────
 # Stage 1: BUILD
 # Dùng JDK đầy đủ + Maven để compile
@@ -22,13 +25,18 @@ WORKDIR /build
 # Nếu pom.xml không đổi → layer "download dependency" được cache lại
 # → lần build sau bỏ qua bước download (~2 phút tiết kiệm mỗi lần)
 COPY pom.xml .
-RUN mvn dependency:go-offline -B --no-transfer-progress
+# Maven cache mount: repo ~/.m2 (cloudsimplus, py4j, gson, ...) được GIỮ LẠI giữa
+# các lần build ⇒ đổi pom.xml không phải tải lại toàn bộ dependency.
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn dependency:go-offline -B --no-transfer-progress
 
 # Bây giờ mới copy source — layer này invalidate thường xuyên hơn
 COPY src ./src
 
-# Package thành fat JAR, bỏ qua test (test chạy riêng)
-RUN mvn package -DskipTests -B --no-transfer-progress
+# Package thành fat JAR, bỏ qua test (test chạy riêng). Cùng cache ~/.m2 để
+# plugin/dependency của bước package cũng không tải lại.
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn package -DskipTests -B --no-transfer-progress
 
 
 # ─────────────────────────────────────────────

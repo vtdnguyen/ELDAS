@@ -6,7 +6,9 @@ CLAUDE.md
 .claude/
 
 assets/
+assets_v2/
 data/
 
 # Alibaba trace data (large CSV — download via scripts/download-trace.sh)
 data/alibaba-trace/
+Tracking_detail.md

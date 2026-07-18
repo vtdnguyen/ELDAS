@@ -1,6 +1,6 @@
 {
   "annotations": {"list": []},
-  "description": "Per-host drill-down. Pick host, scenario, scheduler — see CPU/MEM/GPU/power for that single host, compared against cluster mean. Parameterised: one dashboard file, all 10 hosts.",
+  "description": "Per-host drill-down. Pick host, scenario, scheduler — see CPU/MEM/GPU/power for that single host, compared against cluster mean. Fully parameterised: one dashboard file covers however many hosts NUM_HOSTS creates; the host list is discovered from Prometheus labels.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -27,7 +27,7 @@
     {
       "id": 1, "type": "stat",
       "title": "CPU util",
-      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+      "gridPos": {"h": 4, "w": 5, "x": 0, "y": 1},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
         "expr": "eldas_host_cpu_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}"}],
@@ -43,7 +43,7 @@
     {
       "id": 2, "type": "stat",
       "title": "MEM util",
-      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+      "gridPos": {"h": 4, "w": 5, "x": 5, "y": 1},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
         "expr": "eldas_host_mem_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}"}],
@@ -59,7 +59,7 @@
     {
       "id": 3, "type": "stat",
       "title": "GPU util",
-      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+      "gridPos": {"h": 4, "w": 4, "x": 10, "y": 1},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
         "expr": "eldas_host_gpu_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}"}],
@@ -75,17 +75,40 @@
     {
       "id": 4, "type": "stat",
       "title": "Power draw (W)",
-      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+      "description": "Absolute watt thresholds are intentionally omitted: the ceiling differs per SKU (cpu-only ≈ 200 W, gpu-heavy ≈ 500 W CPU + 4×300 W GPU), so one fixed red line would be wrong for most of a heterogeneous cluster. Compare against the cluster-mean line in the panel below instead.",
+      "gridPos": {"h": 4, "w": 5, "x": 14, "y": 1},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [{"refId": "A",
         "expr": "eldas_host_power_watt{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}"}],
       "fieldConfig": {"defaults": {"unit": "watt", "decimals": 0,
-        "thresholds": {"mode": "absolute", "steps": [
-          {"color": "blue", "value": null},
-          {"color": "green", "value": 200},
-          {"color": "orange", "value": 1500},
-          {"color": "red", "value": 2500}]}}},
-      "options": {"colorMode": "background", "graphMode": "area",
+        "color": {"mode": "fixed", "fixedColor": "text"}}},
+      "options": {"colorMode": "none", "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 5, "type": "stat",
+      "title": "SKU / state",
+      "description": "Hardware class of the selected host (G2.1) and its current power state. 'homogeneous' means TOPOLOGY_CONFIG is unset.",
+      "gridPos": {"h": 4, "w": 5, "x": 19, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {"refId": "A",
+         "expr": "max by (sku) (eldas_host_cpu_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"})",
+         "legendFormat": "{{sku}}"},
+        {"refId": "B",
+         "expr": "eldas_host_state{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"}",
+         "legendFormat": "state"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "none"},
+        "overrides": [
+          {"matcher": {"id": "byFrameRefID", "options": "A"},
+           "properties": [{"id": "custom.hideFrom", "value": {"tooltip": false, "viz": false, "legend": false}}]},
+          {"matcher": {"id": "byFrameRefID", "options": "B"},
+           "properties": [{"id": "mappings", "value": [{"type": "value", "options": {
+              "0": {"text": "SUSPENDED", "color": "dark-blue", "index": 0},
+              "1": {"text": "IDLE",      "color": "orange",    "index": 1},
+              "2": {"text": "ACTIVE",    "color": "green",     "index": 2}}}]}]}]},
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "name",
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
     },
 
@@ -186,18 +209,33 @@
         {
           "id": 30, "type": "timeseries",
           "title": "All hosts CPU — selected host highlighted",
-          "description": "Other hosts shown faded; the currently selected $host highlighted. Helps see whether the chosen host is an outlier.",
+          "description": "Every host drawn thin and grey as background context; the selected host is re-queried separately (refId B) and drawn thick in colour. The previous version declared an override with an empty properties list, so nothing was ever actually highlighted — two queries is the only way to style one series when the host set is dynamic. Legend is off because it does not survive 50 hosts; hover instead.",
           "gridPos": {"h": 9, "w": 24, "x": 0, "y": 25},
           "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
-          "targets": [{"refId": "A",
-            "expr": "max by (host_id) (eldas_host_cpu_util{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
-            "legendFormat": "host {{host_id}}"}],
+          "targets": [
+            {"refId": "A",
+             "expr": "max by (host_id) (eldas_host_cpu_util{scenario=\"$scenario\", scheduler=\"$scheduler\"})",
+             "legendFormat": "h{{host_id}}"},
+            {"refId": "B",
+             "expr": "max by (host_id) (eldas_host_cpu_util{host_id=\"$host\", scenario=\"$scenario\", scheduler=\"$scheduler\"})",
+             "legendFormat": "▶ host $host"}
+          ],
           "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1,
-            "color": {"mode": "palette-classic"},
-            "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 0, "showPoints": "never"}},
-            "overrides": [{"matcher": {"id": "byFrameRefID", "options": "A"},
-              "properties": []}]},
-          "options": {"legend": {"displayMode": "list", "placement": "right", "showLegend": true},
+            "color": {"mode": "fixed", "fixedColor": "text"},
+            "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 0,
+                       "showPoints": "never", "lineStyle": {"fill": "solid"}}},
+            "overrides": [
+              {"matcher": {"id": "byFrameRefID", "options": "A"},
+               "properties": [
+                 {"id": "color", "value": {"mode": "fixed", "fixedColor": "#4a5464"}},
+                 {"id": "custom.lineWidth", "value": 1},
+                 {"id": "custom.hideFrom", "value": {"tooltip": false, "viz": false, "legend": true}}]},
+              {"matcher": {"id": "byFrameRefID", "options": "B"},
+               "properties": [
+                 {"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}},
+                 {"id": "custom.lineWidth", "value": 3},
+                 {"id": "custom.fillOpacity", "value": 12}]}]},
+          "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
             "tooltip": {"mode": "multi", "sort": "desc"}}
         }
       ]

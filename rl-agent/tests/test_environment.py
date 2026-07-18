@@ -62,7 +62,7 @@ def scalar_env(mock_gw):
 class TestSpaces:
     def test_observation_space(self, env):
         assert isinstance(env.observation_space, spaces.Box)
-        assert env.observation_space.shape == (3 * NUM_HOSTS + 4,)
+        assert env.observation_space.shape == (6 * NUM_HOSTS + 4,)
         assert env.observation_space.dtype == np.float32
 
     def test_action_space(self, env):
@@ -76,7 +76,7 @@ class TestReset:
     def test_returns_obs_and_info(self, env):
         obs, info = env.reset()
         assert isinstance(obs, np.ndarray)
-        assert obs.shape == (3 * NUM_HOSTS + 4,)
+        assert obs.shape == (6 * NUM_HOSTS + 4,)
         assert obs.dtype == np.float32
         assert isinstance(info, dict)
 
@@ -119,7 +119,7 @@ class TestStep:
         obs, reward, terminated, truncated, info = env.step(0)
 
         assert isinstance(obs, np.ndarray)
-        assert obs.shape == (3 * NUM_HOSTS + 4,)
+        assert obs.shape == (6 * NUM_HOSTS + 4,)
         assert isinstance(reward, np.ndarray)
         assert reward.shape == (2,)
         assert isinstance(terminated, bool)

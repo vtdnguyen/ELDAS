@@ -91,6 +91,10 @@ def evaluate_baseline(
         "mean_energy_reward": total_energy_reward / max(1, steps),
         "mean_sla_reward": total_sla_reward / max(1, steps),
         "total_energy_kwh": episode_info.get("total_energy_kwh", 0.0),
+        # G2.4/G2.6 — C_SLA (= Σ κ·max(0, completion − deadline), read from
+        # Java's getSlaCost). This is the SLA objective every method is scored
+        # on, so heuristics share the axis with the CMDP sweep and NSGA-II.
+        "total_sla_cost": episode_info.get("total_sla_cost", 0.0),
     }
 
 

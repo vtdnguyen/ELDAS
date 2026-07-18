@@ -71,41 +71,92 @@ public final class DatacenterFactory {
     }
 
     /**
-     * Creates a {@link Datacenter} with a caller-supplied allocation policy.
+     * Creates a {@link Datacenter} with a caller-supplied allocation policy,
+     * discarding the per-host spec maps (homogeneous callers / tests).
+     */
+    public static Datacenter create(CloudSimPlus simulation,
+                                    SimulationConfig.DatacenterSpec dcSpec,
+                                    Map<Host, GpuState> gpuRegistry,
+                                    VmAllocationPolicy policy) {
+        return create(simulation, dcSpec, gpuRegistry,
+                new java.util.IdentityHashMap<>(), new java.util.IdentityHashMap<>(),
+                policy);
+    }
+
+    /**
+     * Creates a {@link Datacenter}, populating GPU state <b>and</b> per-host
+     * spec maps so that heterogeneous topologies (G2.1) can be accounted
+     * host-by-host downstream.
+     *
+     * <p>When {@code dcSpec.isHeterogeneous()} is {@code true}, hosts are built
+     * per {@link SimulationConfig.HostSku} (SKU order preserved). Otherwise the
+     * cluster is homogeneous: {@code hostCount} identical hosts from
+     * {@code dcSpec.hostSpec()}/{@code dcSpec.powerSpec()} — every host maps to
+     * the same spec, so downstream code is oblivious to the distinction.
      *
      * @param simulation   the running CloudSimPlus instance
-     * @param dcSpec       topology + power config
-     * @param gpuRegistry  (output) map that will be populated with one
-     *                     {@link GpuState} entry per host
+     * @param dcSpec       topology + power config (homogeneous or multi-SKU)
+     * @param gpuRegistry  (output) one {@link GpuState} per host (SKU gpu count)
+     * @param hostSpecOut  (output) per-host {@link SimulationConfig.HostSpec}
+     * @param powerSpecOut (output) per-host {@link SimulationConfig.PowerSpec}
      * @param policy       VM-to-Host allocation policy
      * @return fully configured Datacenter
      */
     public static Datacenter create(CloudSimPlus simulation,
                                     SimulationConfig.DatacenterSpec dcSpec,
                                     Map<Host, GpuState> gpuRegistry,
+                                    Map<Host, SimulationConfig.HostSpec> hostSpecOut,
+                                    Map<Host, SimulationConfig.PowerSpec> powerSpecOut,
                                     VmAllocationPolicy policy) {
 
-        SimulationConfig.HostSpec  hs = dcSpec.hostSpec();
-        SimulationConfig.PowerSpec ps = dcSpec.powerSpec();
+        // Build hosts and a parallel list of per-host specs, in the SAME order.
+        List<Host> hosts = new ArrayList<>();
+        List<SimulationConfig.HostSpec>  perHostSpec  = new ArrayList<>();
+        List<SimulationConfig.PowerSpec> perHostPower = new ArrayList<>();
 
-        List<Host> hosts = new ArrayList<>(dcSpec.hostCount());
-
-        for (int i = 0; i < dcSpec.hostCount(); i++) {
-            hosts.add(createHost(hs, ps));
+        if (dcSpec.isHeterogeneous()) {
+            for (SimulationConfig.HostSku sku : dcSpec.skus()) {
+                for (int i = 0; i < sku.count(); i++) {
+                    hosts.add(createHost(sku.hostSpec(), sku.powerSpec()));
+                    perHostSpec.add(sku.hostSpec());
+                    perHostPower.add(sku.powerSpec());
+                }
+            }
+        } else {
+            SimulationConfig.HostSpec  hs = dcSpec.hostSpec();
+            SimulationConfig.PowerSpec ps = dcSpec.powerSpec();
+            for (int i = 0; i < dcSpec.hostCount(); i++) {
+                hosts.add(createHost(hs, ps));
+                perHostSpec.add(hs);
+                perHostPower.add(ps);
+            }
         }
 
         DatacenterSimple dc = new DatacenterSimple(simulation, hosts, policy);
         dc.setSchedulingInterval(dcSpec.schedulingIntervalSec());
 
-        // Populate GPU registry AFTER datacenter creation so that Host objects
-        // have been registered and their identity is stable for map lookups.
-        for (Host host : dc.getHostList()) {
-            gpuRegistry.put(host, new GpuState(hs.gpuCount()));
+        // Populate the registries AFTER datacenter creation, aligning by index:
+        // DatacenterSimple preserves the host list order it was given.
+        List<Host> ordered = dc.getHostList();
+        for (int i = 0; i < ordered.size(); i++) {
+            Host host = ordered.get(i);
+            SimulationConfig.HostSpec  hs = perHostSpec.get(i);
+            SimulationConfig.PowerSpec ps = perHostPower.get(i);
+            gpuRegistry .put(host, new GpuState(hs.gpuCount()));
+            hostSpecOut .put(host, hs);
+            powerSpecOut.put(host, ps);
         }
 
-        System.out.printf("[DatacenterFactory] Created datacenter: %d hosts, "
-                        + "%d PEs/host, %d GPUs/host%n",
-                dcSpec.hostCount(), hs.pesCount(), hs.gpuCount());
+        if (dcSpec.isHeterogeneous()) {
+            System.out.printf("[DatacenterFactory] Created HETEROGENEOUS datacenter: "
+                            + "%d hosts across %d SKU(s)%n",
+                    ordered.size(), dcSpec.skus().size());
+        } else {
+            SimulationConfig.HostSpec hs = dcSpec.hostSpec();
+            System.out.printf("[DatacenterFactory] Created datacenter: %d hosts, "
+                            + "%d PEs/host, %d GPUs/host%n",
+                    dcSpec.hostCount(), hs.pesCount(), hs.gpuCount());
+        }
 
         return dc;
     }

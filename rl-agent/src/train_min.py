@@ -168,6 +168,12 @@ def evaluate(model_path: Path, scenario: str, seed: int,
             break
 
     energy_kwh = float(cloud_env._ep.getTotalEnergyKwh())
+    # C6 — read C_SLA straight from Java (getSlaCost), the SAME source the
+    # heuristics and CMDP-PID use, so ppo-min lands on the campaign's SLA axis
+    # (sla_cost = Σ κ·max(0, tardiness)) rather than the reward-magnitude
+    # (total_sla_reward). Without this a ppo-min row cannot be compared to the
+    # others under one metric (Lưu ý #5).
+    sla_cost = float(cloud_env._ep.getSlaCost())
     output_dir.mkdir(parents=True, exist_ok=True)
     cloud_env.export_metrics(str(output_dir))
 
@@ -189,6 +195,7 @@ def evaluate(model_path: Path, scenario: str, seed: int,
         "total_energy_reward": total_energy_r,
         "total_sla_reward": total_sla_r,
         "total_energy_kwh": energy_kwh,
+        "total_sla_cost": sla_cost,
         "weights": weights.tolist(),
     }
     baseline_json.write_text(json.dumps(existing, indent=2))
@@ -200,6 +207,7 @@ def evaluate(model_path: Path, scenario: str, seed: int,
         "seed": seed,
         "steps": steps,
         "total_energy_kwh": energy_kwh,
+        "total_sla_cost": sla_cost,
         "total_energy_reward": total_energy_r,
         "total_sla_reward": total_sla_r,
         "weights": weights.tolist(),

@@ -152,9 +152,13 @@ class TestIntegration:
         import json
         data = json.loads((tmp_path / "baseline_results.json").read_text())
 
-        # Both baselines ran
-        assert len(data) == 2
-        # Each ran the expected number of steps
-        for name in ["k8s", "random"]:
+        # Every configured baseline ran. Bind to BASELINE_POLICIES rather than a
+        # literal: Phase 1.8 grew the list from 2 (k8s/random) to 5, and a magic
+        # number here silently asserted the old world.
+        assert set(data) == set(baseline_eval.BASELINE_POLICIES)
+        for name in baseline_eval.BASELINE_POLICIES:
             assert data[name]["steps"] == NUM_TASKS
             assert data[name]["total_energy_reward"] < 0
+            # G2.4/G2.6 — C_SLA must be present and non-negative on every row,
+            # since the campaign scores methods on it.
+            assert data[name]["total_sla_cost"] >= 0.0

@@ -94,7 +94,8 @@ public class VmAllocationPolicyK8sDefault extends VmAllocationPolicyAbstract {
      * Range: [0, 1]; 1 = completely idle host.
      */
     private double leastRequestedScore(Host host) {
-        SimulationConfig.HostSpec hs = mgr.hostSpec();
+        // G2.1 — per-host spec so scoring is correct under heterogeneity.
+        SimulationConfig.HostSpec hs = mgr.hostSpec(host);
         double cpuFraction = (double) mgr.freePes(host) / hs.pesCount();
         double memFraction = (double) mgr.freeRam(host) / hs.ramMb();
         return (cpuFraction + memFraction) / 2.0;

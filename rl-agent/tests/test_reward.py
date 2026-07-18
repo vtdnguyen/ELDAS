@@ -200,6 +200,54 @@ class TestRewardNormalizer:
         assert abs(r2[1]) < 5.0
 
 
+# ── RunningScalarNormalizer (G1.3) ──────────────────────────────────────────
+
+
+class TestRunningScalarNormalizer:
+    def test_initial_std_is_one(self):
+        norm = reward.RunningScalarNormalizer()
+        assert norm.count == 0
+        assert norm.std == 1.0
+        assert norm.mean == 0.0
+
+    def test_centered_constant_normalises_to_zero(self):
+        norm = reward.RunningScalarNormalizer(center=True)
+        for _ in range(100):
+            norm.update(-700.0)
+        assert norm.normalize(-700.0) == pytest.approx(0.0, abs=1e-6)
+
+    def test_uncentered_keeps_sign(self):
+        """center=False (cost mode): positive input → positive output."""
+        norm = reward.RunningScalarNormalizer(center=False)
+        for x in np.abs(np.random.default_rng(0).normal(50, 10, size=200)):
+            norm.update(float(x))
+        out = norm.normalize(50.0)
+        assert out > 0.0  # std-only scaling preserves the ≥0 nature of cost
+
+    def test_scales_to_order_one(self):
+        norm = reward.RunningScalarNormalizer(center=False)
+        rng = np.random.default_rng(1)
+        for x in np.abs(rng.normal(1e5, 2e4, size=500)):
+            norm.update(float(x))
+        # Raw ~1e5 → normalised ~O(few), not 1e5.
+        assert abs(norm.normalize(1e5)) < 10.0
+
+    def test_update_and_normalize_advances_state(self):
+        norm = reward.RunningScalarNormalizer(center=True)
+        for v in (-1.0, -2.0, -3.0):
+            norm.update(v)
+        # Probe a value that is NOT the running mean (−2) so the extra sample
+        # in update_and_normalize visibly shifts mean/std.
+        manual = norm.normalize(0.0)
+        combined = reward.RunningScalarNormalizer(center=True)
+        for v in (-1.0, -2.0, -3.0):
+            combined.update(v)
+        out = combined.update_and_normalize(0.0)
+        assert isinstance(out, float)
+        assert combined.count == 4
+        assert manual != pytest.approx(out)  # extra update changed the stats
+
+
 # ── Integration: from_java → normalise → scalarise ────────────────────────
 
 

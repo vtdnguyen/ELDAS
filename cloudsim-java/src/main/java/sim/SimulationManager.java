@@ -68,6 +68,13 @@ public class SimulationManager {
      * without rebuilding the JVM.
      */
     private SimulationConfig.DatacenterSpec dcSpec;
+
+    /**
+     * G2.1 — per-host SKU name, aligned with {@link #hosts} by index. Used
+     * exclusively as a Prometheus label (monitoring must never influence the
+     * simulation); {@code "homogeneous"} for the default single-SKU cluster.
+     */
+    private String[] hostSkuNames = new String[0];
     private final boolean   readEnvOnReset;
     private final String    traceFile;
     private final Scenario  scenario;
@@ -80,6 +87,21 @@ public class SimulationManager {
     private DatacenterBroker  broker;
     private List<Host>        hosts;
     private Map<Host, GpuState> gpuRegistry;
+
+    // G2.1 — Per-host hardware/power specs. For a homogeneous cluster every
+    // host maps to the same spec; for a heterogeneous cluster (topology-hetero
+    // .json) each host carries its SKU's spec. All per-host energy, capacity,
+    // and state-machine maths reads through these maps, so the two cases share
+    // one code path (see specOf/powerOf).
+    private Map<Host, SimulationConfig.HostSpec>  hostSpecOf;
+    private Map<Host, SimulationConfig.PowerSpec> powerSpecOf;
+
+    // G2.1 — Cluster-max capacities, used ONLY to normalise the current-task
+    // features in the observation to a stable [0,1] range across a
+    // heterogeneous cluster (obs shape stays 6H+4 — Lưu ý #14).
+    private int  maxPesPerHost;
+    private long maxRamPerHost;
+    private int  maxGpuPerHost;
 
     // ── Trace & stepping state ─────────────────────────────────────────────
 
@@ -126,6 +148,17 @@ public class SimulationManager {
     private final List<MetricsExporter.Snapshot> snapshots = new ArrayList<>();
     private int slaViolationCount;
 
+    /**
+     * G1.1 — Episode-cumulative Constrained-MDP constraint cost
+     * {@code C_SLA = Σ κ·max(0, completion − deadline)} over all scheduled
+     * tasks (Watt-second-free, units = qos_weight × seconds of tardiness).
+     * Always ≥ 0. Defined ONCE here and reused identically by the per-step
+     * cost in {@link StepResult} and by {@link #getSlaCost()} so the budget
+     * {@code d}, the λ-update, and the effective reward all see the same
+     * quantity (see CLAUDE.md Lưu ý #5). Equals {@code Σ −R_sla}.
+     */
+    private double cumulativeSlaCost;
+
     // ── Thread synchronisation (for RL stepping via Py4J) ──────────────────
 
     private final SynchronousQueue<StepResult> stepResultQueue = new SynchronousQueue<>();
@@ -137,6 +170,7 @@ public class SimulationManager {
     public record StepResult(
         double[] observation,
         double[] reward,       // [R_energy, R_sla]
+        double   cost,         // C_SLA ≥ 0 for THIS step (G1.1, CMDP constraint cost)
         boolean  done,
         int      taskIndex,
         String   taskName
@@ -245,6 +279,14 @@ public class SimulationManager {
     /** Cumulative number of SUSPENDED → ACTIVE wake-up events. */
     public int getTotalWakeups() { return totalWakeups; }
 
+    /**
+     * G1.1 — Episode-cumulative Constrained-MDP constraint cost
+     * {@code C_SLA = Σ κ·max(0, completion − deadline)} (≥ 0). This is the
+     * quantity constrained by the SLA budget {@code d} (E[C_SLA] ≤ d) and
+     * driven by the PID-Lagrangian dual update on the Python side.
+     */
+    public double getSlaCost() { return cumulativeSlaCost; }
+
     /** Cumulative one-shot wake-up energy in kWh (subset of getTotalEnergyKwh). */
     public double getWakeEnergyKwh() {
         return cumulativeWakeEnergyWs / 3_600_000.0;
@@ -280,15 +322,51 @@ public class SimulationManager {
         // 1. CloudSim engine
         simulation = new CloudSimPlus();
 
-        // 2. Datacenter + GPU registry
+        // 2. Datacenter + GPU registry + per-host spec maps (G2.1)
         // IdentityHashMap uses object-reference equality (==), ensuring each
         // Host is stored as a distinct key regardless of its getId() value.
         gpuRegistry = new java.util.IdentityHashMap<>();
-        datacenter  = DatacenterFactory.create(simulation, dcSpec, gpuRegistry);
+        hostSpecOf  = new java.util.IdentityHashMap<>();
+        powerSpecOf = new java.util.IdentityHashMap<>();
+        datacenter  = DatacenterFactory.create(simulation, dcSpec, gpuRegistry,
+                hostSpecOf, powerSpecOf, new org.cloudsimplus.allocationpolicies.VmAllocationPolicySimple());
 
         // 3. Hosts list — use the datacenter's authoritative ordered list,
         //    not gpuRegistry.keySet() (IdentityHashMap has no stable order).
         hosts = new ArrayList<>(datacenter.getHostList());
+
+        // G2.1 — Per-host SKU name, used only as a Prometheus label so Grafana
+        // can group energy/utilisation by hardware class. Derived from dcSpec
+        // rather than plumbed through DatacenterFactory because the factory
+        // builds hosts in SKU order and DatacenterSimple preserves that order —
+        // the same index alignment hostSpecOf/powerSpecOf already rely on.
+        hostSkuNames = new String[hosts.size()];
+        if (dcSpec.isHeterogeneous()) {
+            int idx = 0;
+            for (SimulationConfig.HostSku sku : dcSpec.skus()) {
+                for (int i = 0; i < sku.count() && idx < hostSkuNames.length; i++) {
+                    hostSkuNames[idx++] = sku.name();
+                }
+            }
+            // Defensive: if counts disagree with the built host list, label the
+            // remainder rather than emitting nulls into Prometheus.
+            while (idx < hostSkuNames.length) hostSkuNames[idx++] = "unknown";
+        } else {
+            Arrays.fill(hostSkuNames, "homogeneous");
+        }
+
+        // G2.1 — Cluster-max capacities for stable task-feature normalisation
+        // (homogeneous: these equal the single host spec, so behaviour is
+        // unchanged; heterogeneous: the largest SKU sets the scale).
+        maxPesPerHost = 1;
+        maxRamPerHost = 1L;
+        maxGpuPerHost = 0;
+        for (Host h : hosts) {
+            SimulationConfig.HostSpec hs = hostSpecOf.get(h);
+            maxPesPerHost = Math.max(maxPesPerHost, hs.pesCount());
+            maxRamPerHost = Math.max(maxRamPerHost, hs.ramMb());
+            maxGpuPerHost = Math.max(maxGpuPerHost, hs.gpuCount());
+        }
 
         // 4. Broker
         broker = new DatacenterBrokerSimple(simulation);
@@ -310,6 +388,7 @@ public class SimulationManager {
         lastEnergyTimestamp     = 0;
         totalWakeups            = 0;
         slaViolationCount       = 0;
+        cumulativeSlaCost       = 0;
         hostPeUsage.clear();
         hostRamUsage.clear();
         hostZeroLoadSince.clear();
@@ -350,6 +429,7 @@ public class SimulationManager {
             stepResultQueue.put(new StepResult(
                     buildObservation(),
                     new double[]{0.0, 0.0},
+                    0.0,                       // no task placed yet → zero cost
                     false,
                     currentTaskIdx,
                     tasks.isEmpty() ? "" : tasks.get(currentTaskIdx).name()
@@ -418,10 +498,17 @@ public class SimulationManager {
                 //    the last-completion time when episode just ended.
                 recordSnapshot(lastEnergyTimestamp);
 
+                // G1.1 — Per-step CMDP constraint cost = non-negative SLA
+                // penalty magnitude (= −R_sla). Summing these over the episode
+                // reproduces getSlaCost(); kept here so the agent receives the
+                // cost signal each step.
+                double stepCost = Math.max(0.0, -reward[1]);
+
                 // Emit result
                 stepResultQueue.put(new StepResult(
                         buildObservation(),
                         reward,
+                        stepCost,
                         episodeDone,
                         currentTaskIdx,
                         episodeDone ? "" : tasks.get(currentTaskIdx).name()
@@ -455,7 +542,7 @@ public class SimulationManager {
         // boot). The reward path uses getWakeEnergyKwh() separately so
         // counters never double-count.
         if (wokeUp) {
-            double wakeWs = dcSpec.powerSpec().wakeEnergyKwh() * 3_600_000.0;
+            double wakeWs = powerOf(host).wakeEnergyKwh() * 3_600_000.0;
             cumulativeWakeEnergyWs += wakeWs;
             totalWakeups++;
             MetricsRegistry.incWakeup();
@@ -480,7 +567,7 @@ public class SimulationManager {
 
         // Schedule the future release. With wake-up, the task starts
         // δ_wake seconds later, so its completion slips by the same amount.
-        double wakeLatency = wokeUp ? dcSpec.powerSpec().wakeLatencySec() : 0.0;
+        double wakeLatency = wokeUp ? powerOf(host).wakeLatencySec() : 0.0;
         double endTime = task.creationTime() + wakeLatency + task.duration();
         globalCompletions.offer(new TaskCompletion(
                 endTime, host, task.pesNeeded(),
@@ -536,7 +623,7 @@ public class SimulationManager {
             // released; treat as IDLE starting now.
             return HostState.IDLE;
         }
-        double threshold = dcSpec.powerSpec().idleThresholdSec();
+        double threshold = powerOf(h).idleThresholdSec();
         return (now - zeroSince) >= threshold ? HostState.SUSPENDED : HostState.IDLE;
     }
 
@@ -544,14 +631,35 @@ public class SimulationManager {
     //  RESOURCE STATE ACCESSORS  (used by baseline allocation policies)
     // ════════════════════════════════════════════════════════════════════════
 
+    /**
+     * G2.1 — Per-host hardware spec. Homogeneous clusters return the single
+     * shared spec; heterogeneous clusters return this host's SKU spec.
+     */
+    public SimulationConfig.HostSpec specOf(Host host) {
+        SimulationConfig.HostSpec hs = hostSpecOf.get(host);
+        return hs != null ? hs : dcSpec.hostSpec();
+    }
+
+    /** G2.1 — Per-host power spec (SKU-specific under heterogeneity). */
+    public SimulationConfig.PowerSpec powerOf(Host host) {
+        SimulationConfig.PowerSpec ps = powerSpecOf.get(host);
+        return ps != null ? ps : dcSpec.powerSpec();
+    }
+
+    /** Total GPU cards physically installed on {@code host} (0 for CPU-only). */
+    public int gpuTotal(Host host) {
+        GpuState gpu = gpuRegistry.get(host);
+        return (gpu != null) ? gpu.total() : 0;
+    }
+
     /** Number of CPU PEs currently free on {@code host}. */
     public int freePes(Host host) {
-        return dcSpec.hostSpec().pesCount() - hostPeUsage.getOrDefault(host, 0);
+        return specOf(host).pesCount() - hostPeUsage.getOrDefault(host, 0);
     }
 
     /** RAM (MiB) currently free on {@code host}. */
     public long freeRam(Host host) {
-        return dcSpec.hostSpec().ramMb() - hostRamUsage.getOrDefault(host, 0L);
+        return specOf(host).ramMb() - hostRamUsage.getOrDefault(host, 0L);
     }
 
     /** GPUs currently free on {@code host} (or 0 if not in the registry). */
@@ -560,16 +668,44 @@ public class SimulationManager {
         return (gpu != null) ? gpu.available() : 0;
     }
 
-    /** Per-host capacity normaliser for K8s-style scoring. */
+    /**
+     * Per-host capacity normaliser for baseline scoring (K8s / BestFit).
+     * Heterogeneity-aware overload — prefer this over {@link #hostSpec()}.
+     */
+    public SimulationConfig.HostSpec hostSpec(Host host) {
+        return specOf(host);
+    }
+
+    /**
+     * Reference host spec (first SKU / homogeneous spec). Kept for callers
+     * that need a representative spec; per-host code must use
+     * {@link #hostSpec(Host)} / {@link #specOf(Host)} to stay correct under
+     * heterogeneity.
+     */
     public SimulationConfig.HostSpec hostSpec() {
         return dcSpec.hostSpec();
     }
 
-    /** Check if a host can accept a task (CPU PEs + RAM + GPU). */
+    /**
+     * Check if a host can accept a task (CPU PEs + RAM + GPU + affinity).
+     *
+     * <p>G2.2 — GPU affinity: a task that requests any GPU (either whole
+     * cards {@code num_gpu > 0} or a fractional share {@code gpu_milli > 0})
+     * may only land on a host that physically has GPUs. On a CPU-only SKU
+     * ({@code gpuTotal == 0}) such a task is infeasible, so the action mask
+     * excludes it (Lưu ý #11). For homogeneous clusters every host has GPUs,
+     * so this is a behavioural no-op and the mask matches Phase 1.8.
+     */
     public boolean canHost(Host host, TaskRecord task) {
-        return freePes(host)  >= task.pesNeeded()
-            && freeRam(host)  >= task.memoryMib()
-            && freeGpus(host) >= task.numGpu();
+        if (freePes(host) < task.pesNeeded()) return false;
+        if (freeRam(host) < task.memoryMib()) return false;
+
+        boolean needsGpu = task.numGpu() > 0 || task.gpuMilli() > 0;
+        if (needsGpu) {
+            if (gpuTotal(host) <= 0)         return false;  // affinity
+            if (freeGpus(host) < task.numGpu()) return false;  // capacity (whole cards)
+        }
+        return true;
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -586,8 +722,8 @@ public class SimulationManager {
      * wake-up latency into the completion estimate.
      */
     private double[] computeReward(TaskRecord task, Host host, boolean wokeUp) {
-        SimulationConfig.PowerSpec ps = dcSpec.powerSpec();
-        int pesPerHost = dcSpec.hostSpec().pesCount();
+        SimulationConfig.PowerSpec ps = powerOf(host);           // G2.1 per-host
+        int pesPerHost = specOf(host).pesCount();                // G2.1 per-host
 
         // ── R_energy: incremental energy from this allocation ──
         int usedPes = hostPeUsage.getOrDefault(host, 0);
@@ -618,7 +754,13 @@ public class SimulationManager {
         double estimatedCompletion =
                 task.creationTime() + wakeLatency + task.duration() * congestionFactor;
         double slaSlack = estimatedCompletion - task.deadline();
-        double rSla    = -task.slaLambda() * Math.max(0.0, slaSlack);
+        double tardiness = Math.max(0.0, slaSlack);
+        double rSla     = -task.qosWeight() * tardiness;
+
+        // G1.1 — Accumulate the CMDP constraint cost. C_SLA is the
+        // non-negative magnitude of the SLA penalty (= −R_sla), so the
+        // reward objective and the constraint share one definition.
+        cumulativeSlaCost += task.qosWeight() * tardiness;
 
         if (slaSlack > 1.0) {
             slaViolationCount++;
@@ -691,9 +833,9 @@ public class SimulationManager {
      * when no host is currently in the IDLE window.
      */
     private double nextSuspendTransition() {
-        double threshold = dcSpec.powerSpec().idleThresholdSec();
         double best = Double.POSITIVE_INFINITY;
         for (Map.Entry<Host, Double> e : hostZeroLoadSince.entrySet()) {
+            double threshold = powerOf(e.getKey()).idleThresholdSec();  // G2.1 per-host
             double transition = e.getValue() + threshold;
             // Strict >; equality means the transition already happened.
             if (transition > lastEnergyTimestamp && transition < best) {
@@ -718,13 +860,14 @@ public class SimulationManager {
         double dt = t1 - t0;
         if (dt <= 0) return;
 
-        SimulationConfig.PowerSpec ps = dcSpec.powerSpec();
-        double cpuIdle = ps.cpuIdlePowerWatt();
-        double cpuSpan = ps.cpuMaxPowerWatt() - cpuIdle;
-        double pSus    = ps.suspendedPowerWatt();
-        int    pesPer  = dcSpec.hostSpec().pesCount();
-
         for (Host host : hosts) {
+            // G2.1 — power figures are per-host so each SKU bills correctly.
+            SimulationConfig.PowerSpec ps = powerOf(host);
+            double cpuIdle = ps.cpuIdlePowerWatt();
+            double cpuSpan = ps.cpuMaxPowerWatt() - cpuIdle;
+            double pSus    = ps.suspendedPowerWatt();
+            int    pesPer  = specOf(host).pesCount();
+
             HostState st = stateOf(host, t0);
 
             switch (st) {
@@ -786,7 +929,7 @@ public class SimulationManager {
      *                   [3H+3i]   = 1 if SUSPENDED (state code 0)
      *                   [3H+3i+1] = 1 if IDLE      (state code 1)
      *                   [3H+3i+2] = 1 if ACTIVE    (state code 2)
-     *   [6H..6H+3]    current task: [cpu_norm, mem_norm, gpu_norm, qos_lambda]
+     *   [6H..6H+3]    current task: [cpu_norm, mem_norm, gpu_norm, qos_weight]
      * </pre>
      * Total length = <b>6H + 4</b>.
      *
@@ -801,10 +944,11 @@ public class SimulationManager {
 
         for (int i = 0; i < h; i++) {
             Host host = hosts.get(i);
+            SimulationConfig.HostSpec hs = specOf(host);          // G2.1 per-host
             int  usedPes = hostPeUsage.getOrDefault(host, 0);
             long usedRam = hostRamUsage.getOrDefault(host, 0L);
-            obs[i]         = Math.min(1.0, (double) usedPes / dcSpec.hostSpec().pesCount());
-            obs[h + i]     = Math.min(1.0, (double) usedRam / dcSpec.hostSpec().ramMb());
+            obs[i]         = Math.min(1.0, (double) usedPes / hs.pesCount());
+            obs[h + i]     = Math.min(1.0, (double) usedRam / hs.ramMb());
             GpuState gpu   = gpuRegistry.get(host);
             obs[2 * h + i] = (gpu != null) ? gpu.utilization() : 0.0;
 
@@ -814,14 +958,14 @@ public class SimulationManager {
             obs[3 * h + 3 * i + st.code] = 1.0;
         }
 
-        // Current task features (normalised to [0, 1] based on host capacity)
+        // Current task features (normalised to [0, 1] against the cluster-max
+        // host capacity so the scale is stable under heterogeneity — Lưu ý #14).
         if (!episodeDone && currentTaskIdx < tasks.size()) {
             TaskRecord t = tasks.get(currentTaskIdx);
-            SimulationConfig.HostSpec hs = dcSpec.hostSpec();
-            obs[6 * h]     = (double) t.pesNeeded()  / hs.pesCount();
-            obs[6 * h + 1] = (double) t.memoryMib()  / hs.ramMb();
-            obs[6 * h + 2] = (double) t.numGpu()     / Math.max(1, hs.gpuCount());
-            obs[6 * h + 3] = t.slaLambda() / 3.0;  // normalise: max λ = 3.0
+            obs[6 * h]     = Math.min(1.0, (double) t.pesNeeded()  / maxPesPerHost);
+            obs[6 * h + 1] = Math.min(1.0, (double) t.memoryMib()  / maxRamPerHost);
+            obs[6 * h + 2] = Math.min(1.0, (double) t.numGpu()     / Math.max(1, maxGpuPerHost));
+            obs[6 * h + 3] = t.qosWeight() / 3.0;  // normalise: max κ = 3.0
         }
 
         return obs;
@@ -840,7 +984,6 @@ public class SimulationManager {
         // counter is exported separately for diagnostics.
         double totalKwh = cpuKwh + gpuKwh + wakeKwh;
 
-        int pesPerHost = dcSpec.hostSpec().pesCount();
         int nHosts = hosts.size();
 
         double[] hostCpuUtil = new double[nHosts];
@@ -850,7 +993,7 @@ public class SimulationManager {
         for (int i = 0; i < nHosts; i++) {
             Host h = hosts.get(i);
             int  usedPes = hostPeUsage.getOrDefault(h, 0);
-            double util = Math.min(1.0, (double) usedPes / pesPerHost);
+            double util = Math.min(1.0, (double) usedPes / specOf(h).pesCount());  // G2.1
             hostCpuUtil[i] = util;
             HostState st = stateOf(h, timestamp);
             hostStates[i] = st.code;
@@ -896,14 +1039,16 @@ public class SimulationManager {
      */
     private void pushHostGaugesToPrometheus(double[] hostCpuUtil, int[] hostStates) {
         if (!MetricsRegistry.isEnabled()) return; // skip the loop entirely
-        SimulationConfig.HostSpec  hs = dcSpec.hostSpec();
-        SimulationConfig.PowerSpec ps = dcSpec.powerSpec();
-        double cpuIdle = ps.cpuIdlePowerWatt();
-        double cpuSpan = ps.cpuMaxPowerWatt() - cpuIdle;
-        double pSus    = ps.suspendedPowerWatt();
 
         for (int i = 0; i < hosts.size(); i++) {
             Host h = hosts.get(i);
+            // G2.1 — per-host specs so Grafana power panels bill each SKU right.
+            SimulationConfig.HostSpec  hs = specOf(h);
+            SimulationConfig.PowerSpec ps = powerOf(h);
+            double cpuIdle = ps.cpuIdlePowerWatt();
+            double cpuSpan = ps.cpuMaxPowerWatt() - cpuIdle;
+            double pSus    = ps.suspendedPowerWatt();
+
             long usedRam = hostRamUsage.getOrDefault(h, 0L);
             double cpu = hostCpuUtil[i];
             double mem = Math.min(1.0, (double) usedRam / hs.ramMb());
@@ -923,8 +1068,10 @@ public class SimulationManager {
                 default -> power = pSus;
             }
 
-            MetricsRegistry.recordHost(i, cpu, mem, gpuUtil, power);
-            MetricsRegistry.setHostState(i, hostStates[i]);
+            String sku = (i < hostSkuNames.length && hostSkuNames[i] != null)
+                    ? hostSkuNames[i] : "unknown";
+            MetricsRegistry.recordHost(i, sku, cpu, mem, gpuUtil, power);
+            MetricsRegistry.setHostState(i, sku, hostStates[i]);
         }
     }
 
@@ -962,12 +1109,21 @@ public class SimulationManager {
         actionQueue.poll();
     }
 
-    /** Gracefully shut down (call when the JVM is exiting). */
+    /**
+     * Gracefully shut down: stop the stepping thread and terminate this
+     * episode's CloudSim instance.
+     *
+     * <p>Called on JVM exit, and by {@link GatewayEntryPoint#reset} to reclaim
+     * the previous episode's manager — otherwise its stepping thread is stranded
+     * and pins the whole simulation graph (see the note there). Reset calls this
+     * once per episode, so it stays silent: a per-episode log line would add
+     * thousands of lines to a budget sweep and bury real errors. Callers that
+     * want to announce a teardown log it themselves.
+     */
     public void shutdown() {
         terminateExisting();
         if (simulation != null) {
             simulation.terminate();
         }
-        System.out.println("[SimulationManager] Shutdown complete.");
     }
 }

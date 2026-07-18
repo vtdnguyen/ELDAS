@@ -1,0 +1,14 @@
+# G1.4 — Cross-validation ONLY. Install in an ISOLATED environment (separate
+# venv or throwaway container), NOT into the main rl-agent image: OmniSafe pulls
+# torch + its own gymnasium/numpy pins which can clash with the sb3 stack in
+# requirements.txt. The main training path never imports OmniSafe (CLAUDE.md
+# Lưu ý #3 — we wrap PID-Lagrangian around MaskablePPO and use OmniSafe only as
+# a reference for validate_lambda_vs_omnisafe.py).
+#
+#   python -m venv /tmp/omni && . /tmp/omni/bin/activate
+#   pip install -r requirements-validate.txt
+#   python src/optim/validate_lambda_vs_omnisafe.py
+#
+# CPPOPID = OmniSafe's PID-Lagrangian reference (JMLR 2024).
+omnisafe>=0.5.0
+numpy>=1.24

@@ -6,18 +6,36 @@ services:
       dockerfile: Dockerfile
     container_name: cloudsim
     ports:
-      - "${PY4J_PORT}:${PY4J_PORT}"
+      # SYS.1 — publish the whole gateway range so N parallel envs are reachable
+      # from the host too. NUM_GATEWAYS=1 (default) uses only the first port;
+      # the extra published ports are unbound no-ops until you opt in.
+      - "${PY4J_PORT}-${PY4J_PORT_MAX:-25333}:${PY4J_PORT}-${PY4J_PORT_MAX:-25333}"
       # T5.3 — Publish the Prometheus exporter so `curl localhost:9091/metrics`
       # works from the host for ad-hoc debugging. Internally, Prometheus
       # scrapes through the sim-net bridge regardless of this mapping.
       - "${METRICS_PORT:-9091}:${METRICS_PORT:-9091}"
     volumes:
-      # :ro = read-only, Java chỉ đọc data chứ không ghi
-      - trace-data:/data/trace:ro
-      - results:/data/results
+      # DIRECT bind mount tới thư mục host (KHÔNG dùng named-volume + driver_opts
+      # bind — kiểu đó lưu path WSL đã resolve nên bị "stale" sau mỗi lần Docker
+      # Desktop/WSL restart ⇒ lỗi "exists but doesn't match / no such file").
+      # Direct bind được compose resolve LẠI mỗi lần chạy ⇒ ổn định. Data vẫn
+      # nằm trên host, không có gì để "mất".  :ro = Java chỉ đọc.
+      - ./data/alibaba-trace:/data/trace:ro
+      - ./data/results:/data/results
+      # G2.1 — mount topology configs read-only so TOPOLOGY_CONFIG can point at
+      # /config/topology-hetero.json for the heterogeneous CPU-GPU cluster.
+      - ./config:/config:ro
     environment:
       - PY4J_PORT=${PY4J_PORT}
+      # SYS.1 — number of INDEPENDENT gateways this JVM serves, on ports
+      # PY4J_PORT … PY4J_PORT+NUM_GATEWAYS-1. One per SubprocVecEnv worker.
+      # Default 1 ⇒ unchanged single-gateway topology. Raising it also needs
+      # PY4J_PORT_MAX = PY4J_PORT + NUM_GATEWAYS - 1 so the ports are published.
+      - NUM_GATEWAYS=${NUM_GATEWAYS:-1}
       - RANDOM_SEED=${RANDOM_SEED}
+      # G2.1 — Heterogeneous topology (opt-in). Empty ⇒ homogeneous default
+      # (reproducibility). Set to /config/topology-hetero.json to enable 3 SKUs.
+      - TOPOLOGY_CONFIG=${TOPOLOGY_CONFIG:-}
       # T5.3 — Prometheus exporter (no-op unless MONITORING_ENABLED=true).
       # Defaults below let the stack run unchanged when .env doesn't set them.
       - MONITORING_ENABLED=${MONITORING_ENABLED:-false}
@@ -59,16 +77,29 @@ services:
       cloudsim-java:
         condition: service_healthy
     volumes:
-      - results:/data/results
+      # Direct bind mounts (xem ghi chú ở service cloudsim-java) — ổn định qua
+      # các lần Docker/WSL restart. model-store là named-volume THẬT (lưu model
+      # trong Docker, không phải bind) nên giữ nguyên.
+      - ./data/results:/data/results
       - model-store:/data/models
+      # G2.3 — NSGA-II static baseline reads the trace CSV + topology JSON
+      # directly (offline, no gateway). Read-only mounts.
+      - ./data/alibaba-trace:/data/trace:ro
+      - ./config:/config:ro
     environment:
       # Python dùng tên service "cloudsim-java" để tìm IP — Docker DNS tự resolve
       - GATEWAY_HOST=cloudsim-java
       - GATEWAY_PORT=${PY4J_PORT}
+      # G2.1/G2.3 — topology JSON path shared with the Java side (opt-in).
+      - TOPOLOGY_CONFIG=${TOPOLOGY_CONFIG:-}
       - ENERGY_WEIGHT=${ENERGY_WEIGHT}
       - SLA_WEIGHT=${SLA_WEIGHT}
       - WANDB_API_KEY=${WANDB_API_KEY}
       - RANDOM_SEED=${RANDOM_SEED}
+      # G1.6 — CMDPMetricsExporter auto-detects from MONITORING_ENABLED. Without
+      # this passthrough the variable is absent inside the container, so the
+      # exporter silently no-ops and only the explicit --prometheus flag works.
+      - MONITORING_ENABLED=${MONITORING_ENABLED:-false}
     networks:
       - sim-net
 
@@ -88,11 +119,23 @@ services:
     image: prom/prometheus:v2.55.1
     container_name: eldas-prometheus
     profiles: ["monitoring"]
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=24h"
-      - "--web.enable-lifecycle"
+    # Prometheus has no env-var interpolation in its config file, so a static
+    # "cloudsim-java:9091" target silently breaks the moment METRICS_PORT is
+    # changed. Compose interpolates ${METRICS_PORT} here (host side), and the
+    # sed rewrites the target port into a copy under /tmp before exec'ing
+    # Prometheus. When METRICS_PORT=9091 the sed is a no-op, so the committed
+    # prometheus.yml stays valid and directly runnable on its own.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        sed 's#cloudsim-java:9091#cloudsim-java:${METRICS_PORT:-9091}#'
+        /etc/prometheus/prometheus.yml > /tmp/prometheus.yml &&
+        exec /bin/prometheus
+        --config.file=/tmp/prometheus.yml
+        --storage.tsdb.path=/prometheus
+        --storage.tsdb.retention.time=24h
+        --web.enable-lifecycle
     ports:
       - "9090:9090"
     volumes:
@@ -141,22 +184,11 @@ services:
       start_period: 15s
 
 volumes:
-  # bind mount: map thư mục thật trên máy host vào container
-  trace-data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./data/alibaba-trace
+  # trace-data & results ĐÃ CHUYỂN sang direct bind mount trong từng service
+  # (- ./data/...:/data/...) để tránh lỗi stale bind-path trên Docker Desktop/WSL.
+  # Không khai báo ở đây nữa.
 
-  # named volume: Docker tự quản lý, dữ liệu tồn tại kể cả sau khi container xóa
-  results:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./data/results   # ← maps to ELDAS/data/results/ on your host
-  
+  # named volume THẬT — Docker tự quản lý, lưu model kể cả sau khi container xóa.
   model-store:
 
   # T5.1 — Persistent storage for the optional monitoring stack.

@@ -6,7 +6,11 @@ The Java side (SimulationManager.computeReward) returns a two-component
 vector per step:
 
     reward[0] = R_energy = −ΔE          (negative energy delta, Watt-seconds)
-    reward[1] = R_sla    = −λ × max(0, completion − deadline)
+    reward[1] = R_sla    = −κ × max(0, completion − deadline)
+
+(κ is the per-task QoS weight — Phase 2 G1.0 renamed it from λ so that λ is
+reserved for the Lagrangian multiplier of the Constrained-MDP formulation.
+The non-negative magnitude ``−R_sla`` is the CMDP constraint cost ``C_SLA``.)
 
 Both components are ≤ 0 (penalties).
 
@@ -144,6 +148,70 @@ class RewardNormalizer:
         """Update statistics and return the normalised reward in one call."""
         self.update(reward)
         return self.normalize(reward)
+
+
+# ── Scalar running normaliser (Phase 2, G1.3) ──────────────────────────────
+
+class RunningScalarNormalizer:
+    """Welford online normaliser for a single SCALAR signal.
+
+    The Phase-2 Constrained-MDP core scales ``R_energy`` and ``C_SLA``
+    **separately** before forming the effective reward ``R_energy − λ·C_SLA``
+    (CLAUDE.md Lưu ý #1).  Normalising the *fused* scalar is wrong because the
+    Lagrange multiplier λ drifts over training, so a fused running scale would
+    keep changing meaning.  Two independent instances of this class give each
+    objective its own stable scale for PPO's value head.
+
+    Parameters
+    ----------
+    center : bool
+        If ``True`` (default) subtract the running mean — full standardisation,
+        appropriate for the energy reward.  For the constraint cost ``C_SLA``
+        pass ``center=False`` so the normalised value stays ≥ 0 and ``λ·C_SLA``
+        remains a genuine non-negative penalty.
+    epsilon : float
+        Numerical floor added under the square-root of the variance.
+    """
+
+    def __init__(self, center: bool = True, epsilon: float = 1e-8) -> None:
+        self._n = 0
+        self._mean = 0.0
+        self._m2 = 0.0
+        self._center = center
+        self._epsilon = epsilon
+
+    @property
+    def count(self) -> int:
+        return self._n
+
+    @property
+    def mean(self) -> float:
+        return self._mean
+
+    @property
+    def std(self) -> float:
+        if self._n < 2:
+            return 1.0
+        var = self._m2 / (self._n - 1)
+        return float(np.sqrt(var + self._epsilon))
+
+    def update(self, x: float) -> None:
+        """Incorporate a new scalar sample (Welford's algorithm)."""
+        self._n += 1
+        delta = float(x) - self._mean
+        self._mean += delta / self._n
+        delta2 = float(x) - self._mean
+        self._m2 += delta * delta2
+
+    def normalize(self, x: float) -> float:
+        """Normalise a scalar using running statistics (no state update)."""
+        shift = self._mean if self._center else 0.0
+        return (float(x) - shift) / self.std
+
+    def update_and_normalize(self, x: float) -> float:
+        """Update statistics and return the normalised scalar in one call."""
+        self.update(x)
+        return self.normalize(x)
 
 
 # ── Scalarisation ──────────────────────────────────────────────────────────

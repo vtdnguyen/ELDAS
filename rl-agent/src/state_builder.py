@@ -11,7 +11,7 @@ with layout:
     [3H   .. 6H-1  ]    host state one-hot (3 per host):
                             SUSPENDED, IDLE, ACTIVE
     [6H   .. 6H+3  ]    current task features:
-                            cpu_norm, mem_norm, gpu_norm, qos_lambda_norm
+                            cpu_norm, mem_norm, gpu_norm, qos_weight_norm
 
 Total length = 6H + 4.
 
@@ -27,14 +27,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import struct
+from dataclasses import dataclass
+
 import numpy as np
 from gymnasium import spaces
 
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
-TASK_FEATURE_DIM = 4   # cpu_norm, mem_norm, gpu_norm, qos_lambda_norm
+TASK_FEATURE_DIM = 4   # cpu_norm, mem_norm, gpu_norm, qos_weight_norm
 PER_HOST_DIM     = 6   # cpu_util, mem_util, gpu_util, state_onehot[3]
+
+# SYS.2 — wire-format version of the packed step blob. Must match
+# StepCodec.VERSION on the Java side; a mismatch means the jar and the Python
+# source drifted apart, which would silently misread every field.
+PACKED_VERSION = 1
+_PACKED_HEADER = struct.Struct(">bbiii")   # version, done, taskIndex, H, obsLen
 
 # Slice helpers for the host blocks: feature i ∈ {0..5} starts at i*H.
 # Layout is feature-major (all H CPU utils, then all H mem utils, …).
@@ -85,6 +94,109 @@ def from_java(java_array, num_hosts: int) -> np.ndarray:
         )
     np.clip(obs, 0.0, 1.0, out=obs)
     return obs
+
+
+# ── SYS.2 — packed single-RPC transport ────────────────────────────────────
+
+@dataclass(frozen=True)
+class PackedStep:
+    """One decoded ``StepCodec`` blob — the full result of a step.
+
+    Carries exactly what the per-element Py4J path yields, including the action
+    mask for the resulting state (which the legacy path fetches with a separate
+    ``getActionMask()`` call and H more round trips).
+    """
+
+    observation: np.ndarray   # (6H+4,) float32, clipped to [0, 1]
+    reward: np.ndarray        # (2,) float64 — [R_energy, R_sla]
+    cost: float               # C_SLA ≥ 0 for this step (G1.1)
+    done: bool
+    task_index: int
+    task_name: str
+    # (H,) bool on the packed transport; None on the legacy per-element
+    # transport, which fetches the mask through a separate getActionMask() call.
+    action_mask: np.ndarray | None
+
+
+def decode_packed(blob, num_hosts: int) -> PackedStep:
+    """Decode a ``StepCodec`` blob (see the Java class for the layout).
+
+    Parameters
+    ----------
+    blob : bytes-like
+        The ``byte[]`` returned by ``stepPacked`` / ``resetPacked``. Py4J hands
+        Java ``byte[]`` to Python as ``bytes`` **by value** — a single round
+        trip, unlike ``double[]``/``boolean[]`` which are proxied per element.
+    num_hosts : int
+        Expected H, cross-checked against the blob's own header.
+
+    Raises
+    ------
+    ValueError
+        On a version mismatch, a host-count mismatch, or a truncated blob —
+        all of which mean the two sides disagree about the format and must
+        fail loudly rather than decode garbage into an observation.
+    """
+    buf = bytes(blob)
+    if len(buf) < _PACKED_HEADER.size:
+        raise ValueError(
+            f"Packed step blob is truncated: {len(buf)} bytes, "
+            f"header alone needs {_PACKED_HEADER.size}"
+        )
+
+    version, done, task_index, h, obs_len = _PACKED_HEADER.unpack_from(buf, 0)
+    if version != PACKED_VERSION:
+        raise ValueError(
+            f"Packed step wire-format mismatch: blob says v{version}, this "
+            f"build expects v{PACKED_VERSION} — the Java jar and the Python "
+            f"source are out of sync (rebuild cloudsim-java)."
+        )
+    if h != num_hosts:
+        raise ValueError(f"Host count mismatch: blob says H={h}, env expects {num_hosts}")
+
+    expected_obs = PER_HOST_DIM * num_hosts + TASK_FEATURE_DIM
+    if obs_len != expected_obs:
+        raise ValueError(
+            f"Observation length mismatch: blob says {obs_len}, expected "
+            f"{expected_obs} ({PER_HOST_DIM}×{num_hosts} + {TASK_FEATURE_DIM})"
+        )
+
+    off = _PACKED_HEADER.size
+    # '>f8' — big-endian float64, matching the JVM's natural byte order, so the
+    # decode does not depend on this machine's endianness.
+    obs = np.frombuffer(buf, dtype=">f8", count=obs_len, offset=off).astype(np.float32)
+    off += 8 * obs_len
+
+    reward = np.frombuffer(buf, dtype=">f8", count=2, offset=off).astype(np.float64)
+    off += 16
+
+    cost = float(np.frombuffer(buf, dtype=">f8", count=1, offset=off)[0])
+    off += 8
+
+    mask = np.frombuffer(buf, dtype=np.uint8, count=h, offset=off).astype(bool)
+    off += h
+
+    (name_len,) = struct.unpack_from(">i", buf, off)
+    off += 4
+    if off + name_len > len(buf):
+        raise ValueError(
+            f"Packed step blob is truncated: taskName needs {name_len} bytes "
+            f"at offset {off} but only {len(buf) - off} remain"
+        )
+    task_name = buf[off:off + name_len].decode("utf-8")
+
+    # Clip on a writable copy — np.frombuffer views immutable bytes.
+    obs = np.clip(obs, 0.0, 1.0)
+
+    return PackedStep(
+        observation=obs,
+        reward=reward,
+        cost=cost,
+        done=bool(done),
+        task_index=int(task_index),
+        task_name=task_name,
+        action_mask=mask,
+    )
 
 
 # ── Structured parse (for debugging / logging) ────────────────────────────

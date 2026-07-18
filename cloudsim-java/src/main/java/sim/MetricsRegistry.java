@@ -167,7 +167,12 @@ public final class MetricsRegistry {
     // ── Metric registration ───────────────────────────────────────────────
 
     private static void registerMetrics() {
-        String[] hostLabels = {"host_id", "scenario", "scheduler"};
+        // G2.1 — `sku` identifies the hardware class (gpu-heavy / balanced /
+        // cpu-only, or "homogeneous"). Without it Grafana cannot separate a
+        // GPU-heavy host's 500 W idle draw from a CPU-only host's 60 W, which
+        // is the whole point of the heterogeneous topology. Cardinality cost is
+        // nil: sku is functionally determined by host_id.
+        String[] hostLabels = {"host_id", "sku", "scenario", "scheduler"};
         String[] ctxLabels  = {"scenario", "scheduler"};
 
         hostCpuUtil = Gauge.build()
@@ -274,16 +279,24 @@ public final class MetricsRegistry {
         } catch (Throwable t) { logSwallow("onEpisodeStart", t); }
     }
 
+    /** Legacy 5-arg form — labels the host as {@code sku="homogeneous"}. */
     public static void recordHost(int hostIdx,
+                                  double cpuUtil, double memUtil,
+                                  double gpuUtil, double powerWatt) {
+        recordHost(hostIdx, "homogeneous", cpuUtil, memUtil, gpuUtil, powerWatt);
+    }
+
+    public static void recordHost(int hostIdx, String sku,
                                   double cpuUtil, double memUtil,
                                   double gpuUtil, double powerWatt) {
         if (!enabled) return;
         try {
             String hid = Integer.toString(hostIdx);
-            hostCpuUtil  .labels(hid, scenarioTag, schedulerTag).set(clamp01(cpuUtil));
-            hostMemUtil  .labels(hid, scenarioTag, schedulerTag).set(clamp01(memUtil));
-            hostGpuUtil  .labels(hid, scenarioTag, schedulerTag).set(clamp01(gpuUtil));
-            hostPowerWatt.labels(hid, scenarioTag, schedulerTag).set(Math.max(0, powerWatt));
+            String s   = skuOrDefault(sku);
+            hostCpuUtil  .labels(hid, s, scenarioTag, schedulerTag).set(clamp01(cpuUtil));
+            hostMemUtil  .labels(hid, s, scenarioTag, schedulerTag).set(clamp01(memUtil));
+            hostGpuUtil  .labels(hid, s, scenarioTag, schedulerTag).set(clamp01(gpuUtil));
+            hostPowerWatt.labels(hid, s, scenarioTag, schedulerTag).set(Math.max(0, powerWatt));
         } catch (Throwable t) { logSwallow("recordHost", t); }
     }
 
@@ -317,9 +330,14 @@ public final class MetricsRegistry {
 
     /** T8.2 — Set per-host state code (0/1/2). No-op when disabled. */
     public static void setHostState(int hostIdx, int stateCode) {
+        setHostState(hostIdx, "homogeneous", stateCode);
+    }
+
+    public static void setHostState(int hostIdx, String sku, int stateCode) {
         if (!enabled) return;
         try {
-            hostState.labels(Integer.toString(hostIdx), scenarioTag, schedulerTag)
+            hostState.labels(Integer.toString(hostIdx), skuOrDefault(sku),
+                             scenarioTag, schedulerTag)
                      .set(stateCode);
         } catch (Throwable t) { logSwallow("setHostState", t); }
     }
@@ -355,6 +373,11 @@ public final class MetricsRegistry {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
+
+    /** Prometheus rejects null label values — never let one through. */
+    private static String skuOrDefault(String sku) {
+        return (sku != null && !sku.isBlank()) ? sku : "unknown";
+    }
 
     private static double clamp01(double v) {
         if (Double.isNaN(v) || v < 0) return 0;

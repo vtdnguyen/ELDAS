@@ -32,7 +32,9 @@ public final class ValidationRunner {
 
     private static int passes = 0;
     private static int fails  = 0;
+    private static int skips  = 0;
     private static final List<String> failNotes = new ArrayList<>();
+    private static final List<String> skipNotes = new ArrayList<>();
 
     public static void main(String[] args) {
         banner("ELDAS Java-side validation");
@@ -52,10 +54,23 @@ public final class ValidationRunner {
         testB13_StepAdvancesByExactlyOneTaskPerCall();
         testB14_ActionMaskReflectsCurrentTaskFeasibility();
         testB15_SuspendedHostIsStillSchedulable();
+        testB16_SlaCostIsNonNegativeAndMatchesReward();
+        testB17_HeterogeneousTopologyAndAffinity();
+        testB18_StepCodecPacksLosslessly();
+        testB19_ResetDoesNotLeakSteppingThreads();
 
         banner("Summary");
+        String topo = System.getenv("TOPOLOGY_CONFIG");
+        System.out.printf("topology = %s%n",
+                (topo != null && !topo.isBlank()) ? "HETEROGENEOUS (" + topo + ")"
+                                                  : "homogeneous (default)");
         System.out.printf("PASS = %d (bug confirmed)%n", passes);
         System.out.printf("FAIL = %d (claim contradicted)%n", fails);
+        System.out.printf("SKIP = %d (precondition N/A in this config)%n", skips);
+        if (skips > 0) {
+            System.out.println();
+            for (String n : skipNotes) System.out.println("  - " + n);
+        }
         if (fails > 0) {
             System.out.println();
             for (String n : failNotes) System.out.println("  - " + n);
@@ -480,6 +495,20 @@ public final class ValidationRunner {
     // ──────────────────────────────────────────────────────────────────────
     private static void testB12_EnvOverrideFromSystemProps() {
         try {
+            // G2.1 — This test's precondition is a HOMOGENEOUS, env/prop-driven
+            // topology. When TOPOLOGY_CONFIG is set, the topology JSON is the
+            // more specific source and deliberately overrides the scalar knobs
+            // (NUM_HOSTS / VCPU_PER_HOST / GPU_PER_HOST), so asserting the
+            // sys-props still win would flag intended behaviour as a bug.
+            // Skip rather than emit a misleading FAIL.
+            String topo = System.getenv("TOPOLOGY_CONFIG");
+            if (topo != null && !topo.isBlank()) {
+                skip("B12", "TOPOLOGY_CONFIG='" + topo + "' is set — the topology JSON "
+                        + "intentionally overrides the scalar topology knobs, so the "
+                        + "sys-prop precedence check does not apply");
+                return;
+            }
+
             // Restrict to props we'll mutate so we can roll back deterministically.
             String[] keys = {"eldas.num_hosts", "eldas.vcpu_per_host", "eldas.gpu_per_host"};
             String[] before = new String[keys.length];
@@ -672,6 +701,319 @@ public final class ValidationRunner {
         }
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    //  B16 (G1.1) — CMDP constraint cost C_SLA is well-formed
+    //
+    //  Properties the PID-Lagrangian core depends on:
+    //    (a) getSlaCost() ≥ 0 at all times (it is a one-sided violation cost);
+    //    (b) it is monotonically non-decreasing over the episode (cumulative);
+    //    (c) per-step StepResult.cost() = −min(0, R_sla) (non-negative SLA
+    //        penalty magnitude), and Σ step costs == getSlaCost() (single
+    //        definition reused everywhere — CLAUDE.md Lưu ý #5).
+    // ──────────────────────────────────────────────────────────────────────
+    private static void testB16_SlaCostIsNonNegativeAndMatchesReward() {
+        try {
+            SimulationManager m = new SimulationManager(
+                    SimulationConfig.DEFAULT_DC,
+                    SimulationConfig.TRACE_FILE,
+                    Scenario.LOW,
+                    42L);
+            StepResult first = m.resetSimulation();
+
+            assertTrue("B16a", "C_SLA starts at 0 after reset",
+                    m.getSlaCost() == 0.0);
+            assertTrue("B16a2", "initial reset reports zero step cost",
+                    first.cost() == 0.0);
+
+            double summedStepCost = 0.0;
+            double prevCumulative = 0.0;
+            boolean everNegative = false;
+            boolean everDecreased = false;
+            boolean mismatch = false;
+
+            while (!m.isDone()) {
+                StepResult r = m.step(0);  // pack everything onto host 0
+
+                double stepCost = r.cost();
+                double expectedStepCost = Math.max(0.0, -r.reward()[1]);
+                if (stepCost < 0.0) everNegative = true;
+                if (Math.abs(stepCost - expectedStepCost) > 1e-9) mismatch = true;
+                summedStepCost += stepCost;
+
+                double cumulative = m.getSlaCost();
+                if (cumulative + 1e-9 < prevCumulative) everDecreased = true;
+                prevCumulative = cumulative;
+
+                if (r.done()) break;
+            }
+
+            double finalCost = m.getSlaCost();
+            System.out.printf(
+                "       C_SLA=%.4f, Σ step-cost=%.4f%n", finalCost, summedStepCost);
+
+            assertTrue("B16b", "no negative per-step cost", !everNegative);
+            assertTrue("B16c", "C_SLA never decreases (cumulative)", !everDecreased);
+            assertTrue("B16d", "per-step cost == −min(0, R_sla)", !mismatch);
+            assertTrue("B16e", "Σ step costs == getSlaCost()",
+                    Math.abs(summedStepCost - finalCost) <= 1e-6);
+            assertTrue("B16f", "final C_SLA ≥ 0", finalCost >= 0.0);
+        } catch (Exception e) {
+            fail("B16", e.toString());
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  B19 (SYS) — reset() must not leak the previous episode's stepping thread.
+    //
+    //  GatewayEntryPoint.reset() builds a NEW SimulationManager each time, so
+    //  the OLD manager's terminateExisting() never runs on its own behalf: its
+    //  stepping thread stays blocked forever on an actionQueue nobody will write
+    //  to, and — being a daemon — never blocks JVM exit, so nothing notices.
+    //  Measured before the fix: +1 live "cloudsim-step" thread and ~1.4 MB RSS
+    //  PER RESET (60 resets ⇒ 94→154 threads, 256→340 MB), because each stranded
+    //  thread also pins its entire CloudSim graph against GC. Irrelevant for a
+    //  smoke test; fatal for a budget sweep of hundreds of episodes × dozens of
+    //  runs — exactly the long job this is all for.
+    //
+    //  Verifies that after N resets only ONE stepping thread is alive (the
+    //  current episode's), not N. This is deterministic, not timing-dependent:
+    //  terminateExisting() joins the old thread before reset returns.
+    // ──────────────────────────────────────────────────────────────────────
+    private static int countSteppingThreads() {
+        int n = 0;
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
+            if ("cloudsim-step".equals(t.getName()) && t.isAlive()) n++;
+        }
+        return n;
+    }
+
+    private static void testB19_ResetDoesNotLeakSteppingThreads() {
+        GatewayEntryPoint ep = new GatewayEntryPoint();
+        try {
+            int before = countSteppingThreads();
+            int resets = 6;
+            for (int i = 0; i < resets; i++) {
+                ep.reset("LOW", 42);
+                ep.step(0);   // start the episode so the thread is genuinely busy
+            }
+            int after = countSteppingThreads();
+
+            // Exactly one live stepping thread: the current episode's. Leaking
+            // would give `before + resets`.
+            assertEq("B19a", "only the live episode's stepping thread survives "
+                            + resets + " resets (leak ⇒ " + (before + resets) + ")",
+                    before + 1, after);
+
+            ep.shutdown();
+            // Give the interrupted thread a moment to unwind before counting.
+            Thread.sleep(300);
+            assertEq("B19b", "shutdown() reaps the last stepping thread too",
+                    before, countSteppingThreads());
+        } catch (Exception e) {
+            fail("B19", e.toString());
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  B18 (SYS.2) — StepCodec packs a step into ONE byte[] losslessly.
+    //
+    //  The codec exists because Py4J proxies double[]/boolean[] one element per
+    //  round trip (~76 RPCs ≈ 21 ms per step at H=10, vs ~0.5 ms of actual
+    //  simulation — measured by perf/profile_step.py). byte[] is the one array
+    //  type Py4J passes by value, so the whole payload crosses in one call.
+    //
+    //  This is a CROSS-LANGUAGE contract: Python's state_builder.decode_packed
+    //  reads these exact offsets. So the assertions below pin the *bytes* at
+    //  explicit positions rather than round-tripping through a Java decoder —
+    //  a Java-only round trip would agree with itself while drifting from the
+    //  Python side. tests/test_packed_transport.py pins the mirror image, and
+    //  perf/verify_packed_parity.py proves equality on the live stack.
+    //
+    //  Verifies: (a) version+done+taskIndex+H+obsLen header; (b) observation
+    //  doubles are big-endian at offset 14; (c) reward/cost follow the
+    //  observation; (d) the mask is one byte per host; (e) the UTF-8 task name
+    //  is length-prefixed; (f) the blob is exactly the size the layout implies
+    //  (no padding drift).
+    // ──────────────────────────────────────────────────────────────────────
+    private static void testB18_StepCodecPacksLosslessly() {
+        try {
+            int h = 3;
+            int obsLen = 6 * h + 4;               // 22 — the 6H+4 contract (Lưu ý #14)
+            double[] obs = new double[obsLen];
+            for (int i = 0; i < obsLen; i++) obs[i] = i / 100.0;
+            obs[0] = 1.0;                          // a value with a known bit pattern
+
+            var result = new SimulationManager.StepResult(
+                    obs, new double[]{-3.25, -7.5}, 7.5, true, 13, "pod-xyz");
+            boolean[] mask = {false, true, true};
+
+            byte[] blob = StepCodec.encode(result, mask);
+            var buf = java.nio.ByteBuffer.wrap(blob).order(java.nio.ByteOrder.BIG_ENDIAN);
+
+            assertEq("B18a1", "header: wire version", (int) StepCodec.VERSION, (int) buf.get());
+            assertEq("B18a2", "header: done flag", 1, (int) buf.get());
+            assertEq("B18a3", "header: taskIndex", 13, buf.getInt());
+            assertEq("B18a4", "header: numHosts", h, buf.getInt());
+            assertEq("B18a5", "header: obsLen = 6H+4", obsLen, buf.getInt());
+
+            // (b) Observation starts at byte 14 and is big-endian: 1.0 must be
+            // 3F F0 00 00 00 00 00 00, which is what Python reads as '>f8'.
+            assertEq("B18b1", "observation begins at offset 14", 14, buf.position());
+            byte[] first = java.util.Arrays.copyOfRange(blob, 14, 22);
+            assertTrue("B18b2", "observation[0]=1.0 encoded big-endian (3F F0 ...)",
+                    java.util.Arrays.equals(first, new byte[]{
+                            (byte) 0x3F, (byte) 0xF0, 0, 0, 0, 0, 0, 0}));
+
+            boolean obsOk = true;
+            for (int i = 0; i < obsLen; i++) {
+                if (buf.getDouble() != obs[i]) { obsOk = false; break; }
+            }
+            assertTrue("B18b3", "all " + obsLen + " observation doubles survive exactly", obsOk);
+
+            // (c) reward + cost follow immediately.
+            assertEq("B18c1", "reward[0] = R_energy", -3.25, buf.getDouble());
+            assertEq("B18c2", "reward[1] = R_sla",    -7.5,  buf.getDouble());
+            assertEq("B18c3", "cost = C_SLA ≥ 0",      7.5,  buf.getDouble());
+
+            // (d) one byte per host, in host order.
+            boolean maskOk = true;
+            for (boolean m : mask) {
+                if (buf.get() != (byte) (m ? 1 : 0)) { maskOk = false; break; }
+            }
+            assertTrue("B18d", "action mask is one byte per host, in order", maskOk);
+
+            // (e) length-prefixed UTF-8 name.
+            int nameLen = buf.getInt();
+            byte[] nameBytes = new byte[nameLen];
+            buf.get(nameBytes);
+            assertEq("B18e", "taskName round-trips as length-prefixed UTF-8",
+                    "pod-xyz", new String(nameBytes, java.nio.charset.StandardCharsets.UTF_8));
+
+            // (f) nothing left over: the blob is exactly the documented size.
+            int expectedSize = 14 + 8 * obsLen + 16 + 8 + h + 4 + "pod-xyz".length();
+            assertEq("B18f1", "blob size matches the layout exactly", expectedSize, blob.length);
+            assertEq("B18f2", "decoder consumes the whole blob (no trailing bytes)",
+                    0, buf.remaining());
+        } catch (Exception e) {
+            fail("B18", e.toString());
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  B17 (G2.1 / G2.2) — Heterogeneous topology + GPU affinity masking
+    //
+    //  Builds a 3-SKU cluster (3× GPU-heavy 4-GPU, 3× balanced 2-GPU,
+    //  4× CPU-only 0-GPU = 10 hosts) directly as a DatacenterSpec (no JSON /
+    //  gson at test time — TopologyConfig is tested by parsing separately).
+    //  Verifies:
+    //    (a) total host count = 3+3+4 = 10;
+    //    (b) per-host GPU inventory matches its SKU (0..2→4, 3..5→2, 6..9→0);
+    //    (c) a GPU task (num_gpu>0) is feasible on GPU hosts, INFEASIBLE on
+    //        every CPU-only host (affinity — Lưu ý #11);
+    //    (d) a fractional-GPU task (num_gpu=0 but gpu_milli>0) is ALSO masked
+    //        off CPU-only hosts (affinity keys on either GPU signal);
+    //    (e) a pure-CPU task is feasible on ALL hosts (affinity never over-masks);
+    //    (f) the idle→suspend energy gradient still fires under heterogeneity
+    //        (Lưu ý #12 — hetero must NOT break the P1.8 state machine).
+    // ──────────────────────────────────────────────────────────────────────
+    private static void testB17_HeterogeneousTopologyAndAffinity() {
+        try {
+            var dp = SimulationConfig.DEFAULT_POWER;
+            var dh = SimulationConfig.DEFAULT_HOST;
+
+            // Helper specs: keep vcpu/ram uniform, vary GPU count + CPU power.
+            SimulationConfig.HostSpec gpuHeavyHost = new SimulationConfig.HostSpec(
+                    64, dh.mips(), 256L * 1024, dh.bwMbps(), dh.storageMb(), 4, dh.gpuMemoryMb());
+            SimulationConfig.HostSpec balancedHost = new SimulationConfig.HostSpec(
+                    64, dh.mips(), 256L * 1024, dh.bwMbps(), dh.storageMb(), 2, dh.gpuMemoryMb());
+            SimulationConfig.HostSpec cpuOnlyHost = new SimulationConfig.HostSpec(
+                    64, dh.mips(), 256L * 1024, dh.bwMbps(), dh.storageMb(), 0, dh.gpuMemoryMb());
+
+            SimulationConfig.PowerSpec gpuHeavyPow = new SimulationConfig.PowerSpec(
+                    500, 200, dp.gpuMaxPowerWatt(), dp.gpuIdlePowerWatt(),
+                    dp.idleThresholdSec(), dp.suspendedPowerWatt(), dp.wakeEnergyKwh(), dp.wakeLatencySec());
+            SimulationConfig.PowerSpec balancedPow = new SimulationConfig.PowerSpec(
+                    350, 120, dp.gpuMaxPowerWatt(), dp.gpuIdlePowerWatt(),
+                    dp.idleThresholdSec(), dp.suspendedPowerWatt(), dp.wakeEnergyKwh(), dp.wakeLatencySec());
+            SimulationConfig.PowerSpec cpuOnlyPow = new SimulationConfig.PowerSpec(
+                    200, 60, dp.gpuMaxPowerWatt(), dp.gpuIdlePowerWatt(),
+                    dp.idleThresholdSec(), dp.suspendedPowerWatt(), dp.wakeEnergyKwh(), dp.wakeLatencySec());
+
+            List<SimulationConfig.HostSku> skus = List.of(
+                    new SimulationConfig.HostSku("gpu-heavy", 3, gpuHeavyHost, gpuHeavyPow),
+                    new SimulationConfig.HostSku("balanced",  3, balancedHost, balancedPow),
+                    new SimulationConfig.HostSku("cpu-only",  4, cpuOnlyHost,  cpuOnlyPow));
+
+            var hetSpec = new SimulationConfig.DatacenterSpec(
+                    10, gpuHeavyHost, gpuHeavyPow, 1.0, skus);
+
+            SimulationManager m = new SimulationManager(
+                    hetSpec, SimulationConfig.TRACE_FILE, Scenario.LOW, 42L);
+            m.resetSimulation();
+            List<Host> hosts = m.getHosts();
+
+            // (a) total host count.
+            assertEq("B17a", "hetero cluster has 3+3+4 = 10 hosts", 10, hosts.size());
+
+            // (b) per-host GPU inventory.
+            int[] expectedGpu = {4, 4, 4, 2, 2, 2, 0, 0, 0, 0};
+            boolean gpuInvOk = true;
+            for (int i = 0; i < hosts.size(); i++) {
+                if (m.gpuTotal(hosts.get(i)) != expectedGpu[i]) gpuInvOk = false;
+            }
+            assertTrue("B17b", "per-host GPU inventory matches SKU (4,4,4,2,2,2,0,0,0,0)", gpuInvOk);
+
+            // (c) GPU task: feasible on GPU hosts (0..5), infeasible on CPU-only (6..9).
+            TaskRecord gpuTask = new TaskRecord(
+                    "gpu-t", 4000, 1024, 2, 2000, "", "Guaranteed", "Running",
+                    0, 100, 0, 100, 2.0);
+            boolean gpuFeasibleOnGpuHosts = true, gpuMaskedOnCpuHosts = true;
+            for (int i = 0; i < hosts.size(); i++) {
+                boolean can = m.canHost(hosts.get(i), gpuTask);
+                if (i <= 5 && !can) gpuFeasibleOnGpuHosts = false;
+                if (i >= 6 &&  can) gpuMaskedOnCpuHosts   = false;
+            }
+            assertTrue("B17c1", "GPU task feasible on all GPU hosts (0..5)", gpuFeasibleOnGpuHosts);
+            assertTrue("B17c2", "GPU task masked off every CPU-only host (6..9)", gpuMaskedOnCpuHosts);
+
+            // (d) Fractional-GPU task (num_gpu=0, gpu_milli>0) — still GPU-only.
+            TaskRecord fracTask = new TaskRecord(
+                    "frac-t", 2000, 512, 0, 500, "", "Burstable", "Running",
+                    0, 100, 0, 100, 1.0);
+            boolean fracMaskedOnCpu = true, fracFeasibleOnGpu = true;
+            for (int i = 0; i < hosts.size(); i++) {
+                boolean can = m.canHost(hosts.get(i), fracTask);
+                if (i >= 6 &&  can) fracMaskedOnCpu   = false;
+                if (i <= 5 && !can) fracFeasibleOnGpu = false;
+            }
+            assertTrue("B17d1", "fractional-GPU task masked off CPU-only hosts", fracMaskedOnCpu);
+            assertTrue("B17d2", "fractional-GPU task feasible on GPU hosts",     fracFeasibleOnGpu);
+
+            // (e) Pure-CPU task: feasible everywhere (affinity must not over-mask).
+            TaskRecord cpuTask = new TaskRecord(
+                    "cpu-t", 4000, 1024, 0, 0, "", "BE", "Running",
+                    0, 100, 0, 100, 0.5);
+            int cpuFeasible = 0;
+            for (Host h : hosts) if (m.canHost(h, cpuTask)) cpuFeasible++;
+            assertEq("B17e", "pure-CPU task feasible on all 10 hosts", 10, cpuFeasible);
+
+            // (f) idle→suspend gradient still works under heterogeneity.
+            while (!m.isDone()) {
+                StepResult r = m.step(0);   // pack onto host 0 → hosts 1..9 idle out
+                if (r.done()) break;
+            }
+            int peakSuspended = m.getSnapshots().stream()
+                    .mapToInt(MetricsExporter.Snapshot::suspendedHosts)
+                    .max().orElse(0);
+            System.out.printf("       hetero energy=%.2f kWh, peakSuspended=%d, wakeups=%d%n",
+                    m.getTotalEnergyKwh(), peakSuspended, m.getTotalWakeups());
+            assertTrue("B17f", "idle→suspend still fires under heterogeneity (≥1 suspended)",
+                    peakSuspended >= 1);
+        } catch (Exception e) {
+            fail("B17", e.toString());
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  Helpers
     // ══════════════════════════════════════════════════════════════════════
@@ -709,6 +1051,14 @@ public final class ValidationRunner {
         String line = "[FAIL] " + tag + " — " + msg;
         System.out.println(line);
         failNotes.add(line);
+    }
+
+    /** Precondition for this check does not hold in the current configuration. */
+    private static void skip(String tag, String msg) {
+        skips++;
+        String line = "[SKIP] " + tag + " — " + msg;
+        System.out.println(line);
+        skipNotes.add(line);
     }
 
     private static void banner(String t) {

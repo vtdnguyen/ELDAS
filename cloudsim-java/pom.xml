@@ -29,6 +29,14 @@
       <version>0.10.9.7</version>
     </dependency>
 
+    <!-- G2.1 — Gson parses config/topology-hetero.json into the per-SKU
+         heterogeneous topology. Small (~280 KB), shaded into the fat JAR. -->
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+      <version>2.11.0</version>
+    </dependency>
+
     <!-- T5.3 — Prometheus client (opt-in monitoring). Stays inert unless
          MONITORING_ENABLED=true is set at JVM startup. Adds ~250 KB to the
          fat JAR; no runtime overhead when disabled. -->

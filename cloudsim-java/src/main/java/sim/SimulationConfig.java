@@ -48,13 +48,50 @@ public final class SimulationConfig {
         double wakeLatencySec
     ) {}
 
+    // ── Host SKU (G2.1 — one heterogeneous machine class) ─────────────────
+    /**
+     * G2.1 — A group of {@code count} identical hosts sharing one
+     * {@link HostSpec} + {@link PowerSpec}. A heterogeneous datacenter is a
+     * list of SKUs (e.g. 3× GPU-heavy, 3× balanced, 4× CPU-only). The
+     * homogeneous case is simply a single implicit SKU and is still the
+     * default (see {@link DatacenterSpec#skus}).
+     */
+    public record HostSku(
+        String    name,
+        int       count,
+        HostSpec  hostSpec,
+        PowerSpec powerSpec
+    ) {}
+
     // ── Datacenter specification ──────────────────────────────────────────
+    /**
+     * Datacenter topology. When {@link #skus} is {@code null} or empty the
+     * cluster is <b>homogeneous</b>: {@code hostCount} identical hosts built
+     * from {@code hostSpec}/{@code powerSpec} — the reproducibility default.
+     * When {@code skus} is present the cluster is <b>heterogeneous</b>
+     * (G2.1): hosts are built per-SKU and {@code hostSpec}/{@code powerSpec}
+     * carry the first SKU's specs only as a reference/fallback (e.g. for
+     * top-level printouts); per-host specs are resolved by
+     * {@link DatacenterFactory} and {@link SimulationManager}.
+     */
     public record DatacenterSpec(
         int          hostCount,
         HostSpec     hostSpec,
         PowerSpec    powerSpec,
-        double       schedulingIntervalSec
-    ) {}
+        double       schedulingIntervalSec,
+        java.util.List<HostSku> skus
+    ) {
+        /** Homogeneous convenience constructor ({@code skus = null}). */
+        public DatacenterSpec(int hostCount, HostSpec hostSpec,
+                              PowerSpec powerSpec, double schedulingIntervalSec) {
+            this(hostCount, hostSpec, powerSpec, schedulingIntervalSec, null);
+        }
+
+        /** True when this spec describes a heterogeneous (multi-SKU) cluster. */
+        public boolean isHeterogeneous() {
+            return skus != null && !skus.isEmpty();
+        }
+    }
 
     // ── Defaults — modeled after a typical 8-GPU training node ────────────
     public static final HostSpec DEFAULT_HOST = new HostSpec(
@@ -158,6 +195,37 @@ public final class SimulationConfig {
             cpuIdle, cpuMax, gpuIdle, gpuMax,
             idleThresh, pSusp, wakeKwh, wakeLat);
 
+        // G2.1 — Optional heterogeneous topology. When TOPOLOGY_CONFIG points
+        // at a readable JSON file, its SKUs override the homogeneous cluster
+        // above. Homogeneous stays the default (Lưu ý reproducibility): any
+        // load/parse error falls through to `spec` with a warning — the
+        // simulation never aborts on a bad topology file.
+        String topoPath = resolve("TOPOLOGY_CONFIG", "eldas.topology_config");
+        if (topoPath != null) {
+            try {
+                DatacenterSpec hetero = TopologyConfig.load(topoPath, spec);
+                java.util.List<HostSku> skus = hetero.skus();
+                System.out.printf(
+                    "[SimulationConfig] TOPOLOGY_CONFIG=%s → heterogeneous: "
+                  + "%d hosts across %d SKU(s)%n",
+                    topoPath, hetero.hostCount(), skus.size());
+                for (HostSku s : skus) {
+                    System.out.printf(
+                        "    SKU %-12s ×%-2d | vcpu=%d ram=%dGB gpu=%d | "
+                      + "cpu[%.0f/%.0f]W gpu[%.0f/%.0f]W%n",
+                        s.name(), s.count(), s.hostSpec().pesCount(),
+                        s.hostSpec().ramMb() / 1024, s.hostSpec().gpuCount(),
+                        s.powerSpec().cpuIdlePowerWatt(), s.powerSpec().cpuMaxPowerWatt(),
+                        s.powerSpec().gpuIdlePowerWatt(), s.powerSpec().gpuMaxPowerWatt());
+                }
+                return hetero;
+            } catch (Exception e) {
+                System.err.printf(
+                    "[SimulationConfig] Failed to load TOPOLOGY_CONFIG='%s' (%s) "
+                  + "— falling back to homogeneous topology%n", topoPath, e.getMessage());
+            }
+        }
+
         return spec;
     }
 
@@ -211,9 +279,13 @@ public final class SimulationConfig {
         }
     }
 
-    // ── QoS → SLA penalty multiplier (λ) ─────────────────────────────────
-    // Higher λ  ⇒  heavier penalty for deadline miss
-    public static double qosToLambda(String qos) {
+    // ── QoS → SLA penalty multiplier (κ) ─────────────────────────────────
+    // Higher κ  ⇒  heavier penalty for deadline miss.
+    //
+    // Phase 2 (G1.0): renamed from {@code qosToLambda} to free the symbol λ
+    // for the Lagrangian multiplier of the Constrained-MDP formulation. This
+    // coefficient is the QoS weight κ in C_SLA = κ·max(0, completion − deadline).
+    public static double qosToWeight(String qos) {
         return switch (qos) {
             case "LS"         -> 3.0;   // Latency-Sensitive
             case "Guaranteed" -> 2.0;
@@ -227,7 +299,7 @@ public final class SimulationConfig {
     // deadline = creationTime + duration × slackFactor(qos).
     //
     // The looser the slack, the more tolerant the QoS class is of
-    // contention-induced slowdown. Tightly coupled to {@link #qosToLambda}:
+    // contention-induced slowdown. Tightly coupled to {@link #qosToWeight}:
     // strict classes (LS) get strict deadlines AND high penalty multipliers.
     public static double qosToSlackFactor(String qos) {
         return switch (qos) {

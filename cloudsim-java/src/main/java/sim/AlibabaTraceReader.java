@@ -34,7 +34,7 @@ public final class AlibabaTraceReader {
         double deletionTime,    // seconds from trace start
         double scheduledTime,   // seconds from trace start
         double deadline,        // derived: expected completion time
-        double slaLambda        // derived: QoS → penalty multiplier
+        double qosWeight        // derived: QoS → penalty multiplier κ (G1.0)
     ) {
         /** Estimated execution duration (seconds). */
         public double duration() {
@@ -136,11 +136,11 @@ public final class AlibabaTraceReader {
             double rawDuration = Math.max(0, deletion - Math.max(creation, scheduled));
             double deadline    = creation + rawDuration * SimulationConfig.qosToSlackFactor(qos);
 
-            double slaLambda = SimulationConfig.qosToLambda(qos);
+            double qosWeight = SimulationConfig.qosToWeight(qos);
 
             return new TaskRecord(name, cpuMilli, memoryMib, numGpu, gpuMilli,
                     gpuSpec, qos, podPhase, creation, deletion, scheduled,
-                    deadline, slaLambda);
+                    deadline, qosWeight);
 
         } catch (Exception e) {
             System.err.printf("[AlibabaTraceReader] Line %d: parse error (%s) — skipped%n",

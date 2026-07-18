@@ -9,11 +9,17 @@ py4j==0.10.9.7
 
 # ML tracking
 wandb==0.19.1
+# G1.6 — Python Prometheus exporter for CMDP training metrics (ephemeral, port 8000).
+prometheus_client==0.21.1
 
 # Data & math
 numpy==2.2.1
 pandas==2.2.3
 matplotlib==3.10.0
+
+# G2.3/G2.4 — NSGA-II reference Pareto front + hypervolume / IGD+ metrics.
+# pymoo is Pareto-compliant and provides the static baseline solver.
+pymoo==0.6.1.3
 
 # Utilities — để pip tự resolve version tương thích
 # KHÔNG pin gymnasium thủ công — SB3 và mo-gymnasium tự kéo đúng version

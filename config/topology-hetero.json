@@ -1,0 +1,34 @@
+{
+  "name": "hetero-3sku",
+  "schedulingIntervalSec": 1.0,
+  "_comment": "G2.1 heterogeneous topology — 10 hosts across 3 SKUs. Loaded when TOPOLOGY_CONFIG points here; homogeneous (NUM_HOSTS identical hosts) stays the reproducibility default. Only fields that differ from the env-var defaults need overriding; absent numeric fields inherit the homogeneous defaults. vcpu/ram are kept uniform (64 vCPU / 256 GB) so the SKUs differ only along the energy axis (P_idle/P_max) and the GPU-affinity axis (gpu count) — the two dimensions G2.1/G2.2 add.",
+  "skus": [
+    {
+      "name": "gpu-heavy",
+      "count": 3,
+      "vcpu": 64,
+      "ramGb": 256,
+      "gpu": 4,
+      "cpuIdleWatt": 200,
+      "cpuMaxWatt": 500
+    },
+    {
+      "name": "balanced",
+      "count": 3,
+      "vcpu": 64,
+      "ramGb": 256,
+      "gpu": 2,
+      "cpuIdleWatt": 120,
+      "cpuMaxWatt": 350
+    },
+    {
+      "name": "cpu-only",
+      "count": 4,
+      "vcpu": 64,
+      "ramGb": 256,
+      "gpu": 0,
+      "cpuIdleWatt": 60,
+      "cpuMaxWatt": 200
+    }
+  ]
+}

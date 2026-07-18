@@ -1,5 +1,6 @@
 {
   "annotations": {"list": []},
+  "description": "Side-by-side scheduler comparison within ONE scenario. Every panel is scoped by the $scenario variable: energy is a per-(scenario, scheduler) gauge, so aggregating without that filter adds LOW+HIGH+BURST together and produces a meaningless number. Live/debug view only — thesis figures come from metrics.csv + WandB in sim-time (Lưu ý #16), and Pareto fronts from eval/pareto_plot.py.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -10,35 +11,29 @@
     {
       "id": 1,
       "type": "table",
-      "title": "Scheduler snapshot — current values per (scenario, scheduler)",
-      "description": "One row per active context. Lower energy + lower SLA violations = closer to Pareto front.",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+      "title": "Scheduler snapshot — $scenario",
+      "description": "One row per scheduler in the selected scenario. Lower energy AND lower SLA violations = closer to the Pareto front; a scheduler that wins on one and loses on the other is a front point, not a winner.",
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 0},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [
-        {
-          "refId": "energy",
-          "expr": "eldas_total_energy_kwh",
-          "format": "table",
-          "instant": true
-        },
-        {
-          "refId": "scheduled",
-          "expr": "eldas_tasks_scheduled_total",
-          "format": "table",
-          "instant": true
-        },
-        {
-          "refId": "pending",
-          "expr": "eldas_pending_tasks",
-          "format": "table",
-          "instant": true
-        },
-        {
-          "refId": "sla",
-          "expr": "sum by (scenario, scheduler) (eldas_sla_violations_total)",
-          "format": "table",
-          "instant": true
-        }
+        {"refId": "energy",
+         "expr": "max by (scheduler) (eldas_total_energy_kwh{scenario=\"$scenario\"})",
+         "format": "table", "instant": true},
+        {"refId": "scheduled",
+         "expr": "max by (scheduler) (eldas_tasks_scheduled_total{scenario=\"$scenario\"})",
+         "format": "table", "instant": true},
+        {"refId": "pending",
+         "expr": "max by (scheduler) (eldas_pending_tasks{scenario=\"$scenario\"})",
+         "format": "table", "instant": true},
+        {"refId": "sla",
+         "expr": "sum by (scheduler) (eldas_sla_violations_total{scenario=\"$scenario\"})",
+         "format": "table", "instant": true},
+        {"refId": "wakeups",
+         "expr": "sum by (scheduler) (eldas_total_wakeups_total{scenario=\"$scenario\"})",
+         "format": "table", "instant": true},
+        {"refId": "util",
+         "expr": "avg by (scheduler) (eldas_host_cpu_util{scenario=\"$scenario\"})",
+         "format": "table", "instant": true}
       ],
       "transformations": [
         {
@@ -49,75 +44,79 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true,
-              "__name__ 1": true, "__name__ 2": true, "__name__ 3": true,
-              "instance 1": true, "instance 2": true, "instance 3": true, "instance 4": true,
-              "job 1": true, "job 2": true, "job 3": true, "job 4": true,
-              "source 1": true, "source 2": true, "source 3": true, "source 4": true,
-              "scenario 2": true, "scenario 3": true, "scenario 4": true
+              "Time": true, "Time 1": true, "Time 2": true, "Time 3": true,
+              "Time 4": true, "Time 5": true, "Time 6": true
             },
             "renameByName": {
-              "scenario 1": "scenario",
+              "scheduler": "scheduler",
               "Value #energy": "energy (kWh)",
               "Value #scheduled": "scheduled (cum.)",
               "Value #pending": "pending",
-              "Value #sla": "SLA violations (cum.)"
+              "Value #sla": "SLA violations (cum.)",
+              "Value #wakeups": "wake-ups (cum.)",
+              "Value #util": "mean CPU util"
             }
           }
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": {"align": "auto", "displayMode": "auto"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
+          "custom": {"align": "auto", "cellOptions": {"type": "auto"}},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
         },
         "overrides": [
           {
             "matcher": {"id": "byName", "options": "energy (kWh)"},
             "properties": [
-              {"id": "custom.displayMode", "value": "gradient-gauge"},
+              {"id": "custom.cellOptions", "value": {"type": "gauge", "mode": "gradient"}},
               {"id": "color", "value": {"mode": "continuous-GrYlRd"}},
-              {"id": "decimals", "value": 3}
+              {"id": "decimals", "value": 1}
             ]
           },
           {
             "matcher": {"id": "byName", "options": "SLA violations (cum.)"},
             "properties": [
-              {"id": "custom.displayMode", "value": "gradient-gauge"},
-              {"id": "color", "value": {"mode": "continuous-GrYlRd"}}
+              {"id": "custom.cellOptions", "value": {"type": "gauge", "mode": "gradient"}},
+              {"id": "color", "value": {"mode": "continuous-GrYlRd"}},
+              {"id": "decimals", "value": 0}
             ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "mean CPU util"},
+            "properties": [
+              {"id": "unit", "value": "percentunit"},
+              {"id": "decimals", "value": 3}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "wake-ups (cum.)"},
+            "properties": [{"id": "decimals", "value": 0}]
           }
         ]
       },
       "options": {
         "showHeader": true,
-        "sortBy": [{"displayName": "scheduler", "desc": false}]
+        "sortBy": [{"displayName": "energy (kWh)", "desc": false}]
       }
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Total energy over time — by scheduler",
-      "description": "Steeper slope = more energy spent per second of simulation. Compare runs of the same scenario.",
-      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 8},
+      "title": "Episode energy over time — by scheduler ($scenario)",
+      "description": "Steeper slope = more energy per simulated second. The gauge resets to 0 at each episode start, so a sawtooth is expected across episodes.",
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 9},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (scheduler) (eldas_total_energy_kwh)",
-          "legendFormat": "{{scheduler}}"
-        }
+        {"refId": "A",
+         "expr": "max by (scheduler) (eldas_total_energy_kwh{scenario=\"$scenario\"})",
+         "legendFormat": "{{scheduler}}"}
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "none",
-          "decimals": 3,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never"
-          }
+          "decimals": 1,
+          "color": {"mode": "palette-classic"},
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never"}
         }
       },
       "options": {
@@ -128,26 +127,20 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "SLA violations rate — by scheduler",
-      "description": "Higher line = scheduler letting more deadlines slip.",
-      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 8},
+      "title": "SLA violation rate — by scheduler ($scenario)",
+      "description": "Higher line = scheduler letting more deadlines slip. Read together with the energy panel: the two together are the whole multi-objective problem.",
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 9},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (scheduler) (rate(eldas_sla_violations_total[1m]))",
-          "legendFormat": "{{scheduler}}"
-        }
+        {"refId": "A",
+         "expr": "sum by (scheduler) (rate(eldas_sla_violations_total{scenario=\"$scenario\"}[1m]))",
+         "legendFormat": "{{scheduler}}"}
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never"
-          }
+          "color": {"mode": "palette-classic"},
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never"}
         }
       },
       "options": {
@@ -159,31 +152,21 @@
       "id": 4,
       "type": "bargauge",
       "title": "Cluster CPU spread (stddev across hosts) — lower = more even",
-      "description": "K8s default minimises this number (its priority is LeastRequestedPriority). Random/MORL-energy will have a HIGHER stddev because they cluster tasks onto fewer hosts.",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
+      "description": "K8s default minimises this (LeastRequestedPriority). BestFit / energy-seeking policies show a HIGHER stddev because they pack tasks onto fewer hosts and suspend the rest. Max is left unset so the scale adapts instead of clipping.",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 19},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [
-        {
-          "refId": "A",
-          "expr": "stddev by (scheduler) (eldas_host_cpu_util)",
-          "legendFormat": "{{scheduler}}",
-          "instant": true
-        }
+        {"refId": "A",
+         "expr": "stddev by (scheduler) (eldas_host_cpu_util{scenario=\"$scenario\"})",
+         "legendFormat": "{{scheduler}}",
+         "instant": true}
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
           "min": 0,
-          "max": 0.5,
           "decimals": 3,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "green",  "value": null},
-              {"color": "orange", "value": 0.1},
-              {"color": "red",    "value": 0.25}
-            ]
-          }
+          "color": {"mode": "continuous-BlYlRd"}
         }
       },
       "options": {
@@ -197,23 +180,20 @@
       "id": 5,
       "type": "bargauge",
       "title": "Mean cluster utilisation — by scheduler",
-      "description": "Same workload, different schedulers → utilisation can differ if some schedulers leave hosts idle while others pack them.",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 19},
       "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
       "targets": [
-        {
-          "refId": "A",
-          "expr": "avg by (scheduler) (eldas_host_cpu_util)",
-          "legendFormat": "{{scheduler}}",
-          "instant": true
-        }
+        {"refId": "A",
+         "expr": "avg by (scheduler) (eldas_host_cpu_util{scenario=\"$scenario\"})",
+         "legendFormat": "{{scheduler}}",
+         "instant": true}
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
           "min": 0,
           "max": 1,
-          "decimals": 2,
+          "decimals": 3,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -231,17 +211,92 @@
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
         "showUnfilled": true
       }
+    },
+    {
+      "id": 6,
+      "type": "bargauge",
+      "title": "Suspended-host share — by scheduler",
+      "description": "Fraction of the cluster powered down. Self-normalising, so it stays comparable across NUM_HOSTS=10 and NUM_HOSTS=50. This is the mechanism behind any energy win.",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 19},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {"refId": "A",
+         "expr": "sum by (scheduler) (eldas_host_state_count{state=\"suspended\", scenario=\"$scenario\"}) / sum by (scheduler) (eldas_host_state_count{scenario=\"$scenario\"})",
+         "legendFormat": "{{scheduler}}",
+         "instant": true}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red",    "value": null},
+              {"color": "orange", "value": 0.1},
+              {"color": "green",  "value": 0.3}
+            ]
+          }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Energy by SKU — where the watts actually go ($scenario)",
+      "description": "Only meaningful under TOPOLOGY_CONFIG=/config/topology-hetero.json; a homogeneous cluster reports a single 'homogeneous' bar. Shows whether a scheduler is parking work on expensive gpu-heavy nodes (200 W idle) when cpu-only nodes (60 W idle) would do.",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 27},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {"refId": "A",
+         "expr": "sum by (scheduler, sku) (max by (host_id, sku, scheduler) (eldas_host_power_watt{scenario=\"$scenario\"}))",
+         "legendFormat": "{{scheduler}} / {{sku}}",
+         "instant": true}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "min": 0,
+          "decimals": 0,
+          "color": {"mode": "continuous-BlYlRd"}
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "showUnfilled": true
+      }
     }
   ],
   "refresh": "10s",
-  "schemaVersion": 38,
+  "schemaVersion": 39,
   "tags": ["eldas", "comparison", "pareto"],
-  "templating": {"list": []},
+  "templating": {
+    "list": [
+      {
+        "name": "scenario", "label": "Scenario", "type": "query",
+        "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+        "query": {"query": "label_values(eldas_host_cpu_util, scenario)", "refId": "Scenario"},
+        "current": {"text": "HIGH", "value": "HIGH", "selected": false},
+        "includeAll": false, "multi": false,
+        "refresh": 1, "sort": 1
+      }
+    ]
+  },
   "time": {"from": "now-1h", "to": "now"},
   "timepicker": {},
   "timezone": "",
   "title": "ELDAS Scheduler Comparison",
   "uid": "eldas-scheduler-comparison",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

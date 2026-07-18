@@ -32,6 +32,14 @@ scrape_configs:
     # rl-agent is ephemeral (`docker compose run --rm …`). When no episode
     # is running the container is gone; Prometheus will log "context
     # deadline exceeded" once per cycle — that is expected and harmless.
+    #
+    # ⚠ `docker compose run` does NOT give the container the service's network
+    # alias — it is reachable only under its own generated container name, so
+    # this static "rl-agent:8000" target can never resolve. Training runs that
+    # should be scraped MUST pass --use-aliases:
+    #     docker compose run --rm --use-aliases rl-agent \
+    #         python src/train_cmdp.py --scenario HIGH --prometheus
+    # (Verified: without the flag the target stays DOWN for the whole run.)
     static_configs:
       - targets: ["rl-agent:8000"]
         labels:

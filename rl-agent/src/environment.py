@@ -11,6 +11,13 @@ Gymnasium / MO-Gymnasium interface for RL training:
 Key features:
   - **Vector reward**: returns ``np.ndarray([R_energy, R_sla])`` — keeps
     multi-objective signal intact for MO-Gymnasium / MORL algorithms.
+  - **CMDP signal** (Phase 2, G1.1): each ``step`` also surfaces the
+    Constrained-MDP pieces in ``info`` — ``info["cost"]`` is the per-step
+    constraint cost ``C_SLA ≥ 0`` (= ``−R_sla``) and ``info["reward_energy"]``
+    is the energy objective ``R_energy`` (= ``reward[0]``).  The end-of-episode
+    summary carries ``total_sla_cost = Σ C_SLA`` (the quantity constrained by
+    the SLA budget ``d``).  These leave the Phase-1 vector reward untouched so
+    fixed-weight PPO keeps working.
   - **Action masking**: ``env.action_masks()`` returns a bool array for
     MaskablePPO (sb3-contrib).  Invalid hosts are masked out.
   - **Linear scalarization wrapper**: ``ScalarRewardWrapper`` converts
@@ -21,6 +28,7 @@ Key features:
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import time
 from typing import Any
@@ -129,9 +137,21 @@ class CloudSimEnv(gym.Env):
         self._gateway = _connect_gateway(gateway_host, gateway_port)
         self._ep = self._gateway.entry_point
 
+        # SYS.2 — Prefer the packed single-RPC transport when the gateway offers
+        # it. Py4J proxies double[]/boolean[] element-by-element (one round trip
+        # each), so the legacy path spends ~76 RPCs ≈ 21 ms per step at H=10
+        # while the simulation itself takes ~0.5 ms. The packed path carries the
+        # identical numbers in one RPC. Probed rather than assumed so an older
+        # jar — or the unit-test double — still works on the reference path.
+        self._packed = self._detect_packed_transport()
+
         # Do an initial reset to discover action/observation sizes
-        self._initial_result = self._ep.reset(self._scenario, self._seed)
+        self._initial_result = self._reset_java(self._scenario, self._seed)
         self._num_hosts: int = int(self._ep.getActionSize())
+
+        # Mask for the current state. The packed blob already carries it, which
+        # removes the separate getActionMask() call (another 1+H round trips).
+        self._cached_mask: np.ndarray | None = None
 
         # Spaces
         self.observation_space = state_builder.observation_space(self._num_hosts)
@@ -142,7 +162,56 @@ class CloudSimEnv(gym.Env):
         self._done = False
         self._step_count = 0
         self._episode_rewards: list[np.ndarray] = []
+        self._episode_cost = 0.0  # G1.1 — running Σ C_SLA for this episode
         self._needs_initial_reset = True
+
+    # ── Transport (SYS.2) ──────────────────────────────────────────────
+
+    def _detect_packed_transport(self) -> bool:
+        """Ask the gateway whether it speaks the packed single-RPC protocol."""
+        try:
+            supported = bool(self._ep.supportsPackedTransport())
+        except Exception:
+            # Older jar or a test double without the method — use the reference
+            # per-element path. Slower, but identical numbers.
+            return False
+        if supported:
+            print("[environment] SYS.2: packed single-RPC transport enabled")
+        return supported
+
+    def _reset_java(self, scenario: str, seed: int):
+        if self._packed:
+            return self._ep.resetPacked(scenario, int(seed))
+        return self._ep.reset(scenario, int(seed))
+
+    def _step_java(self, action: int):
+        if self._packed:
+            return self._ep.stepPacked(int(action))
+        return self._ep.step(int(action))
+
+    def _decode(self, raw) -> state_builder.PackedStep:
+        """Normalise either transport into a single internal representation.
+
+        Both branches produce the same dtypes via the same converters, so the
+        packed path cannot introduce a numerical difference — only a transport
+        one.  The legacy branch leaves ``action_mask`` as ``None`` because that
+        path fetches the mask through a separate ``getActionMask()`` call.
+        """
+        if self._packed:
+            pk = state_builder.decode_packed(raw, self._num_hosts)
+            # Route the reward through the shared converter so dtype and the
+            # length check are identical on both paths.
+            return dataclasses.replace(pk, reward=reward_mod.from_java(pk.reward))
+
+        return state_builder.PackedStep(
+            observation=state_builder.from_java(raw.observation(), self._num_hosts),
+            reward=reward_mod.from_java(raw.reward()),
+            cost=float(raw.cost()),
+            done=bool(raw.done()),
+            task_index=int(raw.taskIndex()),
+            task_name=str(raw.taskName()),
+            action_mask=None,
+        )
 
     # ── Gymnasium API ──────────────────────────────────────────────────
 
@@ -174,21 +243,22 @@ class CloudSimEnv(gym.Env):
             result = self._initial_result
             self._needs_initial_reset = False
         else:
-            result = self._ep.reset(ep_scenario, ep_seed)
+            result = self._reset_java(ep_scenario, ep_seed)
 
-        self._current_obs = state_builder.from_java(
-            result.observation(), self._num_hosts
-        )
+        decoded = self._decode(result)
+        self._current_obs = decoded.observation
+        self._cached_mask = decoded.action_mask
         self._done = False
         self._step_count = 0
         self._episode_rewards = []
+        self._episode_cost = 0.0
 
         if self._reward_normalizer is not None:
             self._reward_normalizer = reward_mod.RewardNormalizer()
 
         info = {
-            "task_index": int(result.taskIndex()),
-            "task_name": str(result.taskName()),
+            "task_index": decoded.task_index,
+            "task_name": decoded.task_name,
             "num_hosts": self._num_hosts,
             "scenario": ep_scenario,
             "seed": ep_seed,
@@ -216,28 +286,40 @@ class CloudSimEnv(gym.Env):
         if self._done:
             raise RuntimeError("Episode is done — call reset() first")
 
-        result = self._ep.step(int(action))
+        result = self._step_java(int(action))
+        decoded = self._decode(result)
 
-        self._current_obs = state_builder.from_java(
-            result.observation(), self._num_hosts
-        )
-        raw_reward = reward_mod.from_java(result.reward())
+        self._current_obs = decoded.observation
+        # SYS.2 — the packed blob carries the next mask, so action_masks() below
+        # costs no round trip. None on the legacy path ⇒ fetched on demand.
+        self._cached_mask = decoded.action_mask
+        raw_reward = decoded.reward
+
+        # G1.1 — CMDP constraint cost for this step (C_SLA ≥ 0). Read straight
+        # from Java so reward and cost share a single source of truth; the raw
+        # (un-normalised) value is surfaced in info for the PID-Lagrangian
+        # layer, which normalises R_energy and C_SLA separately (Lưu ý #1).
+        raw_cost = decoded.cost
+        self._episode_cost += raw_cost
 
         if self._reward_normalizer is not None:
             reward_vec = self._reward_normalizer.update_and_normalize(raw_reward)
         else:
             reward_vec = raw_reward
 
-        terminated = bool(result.done())
+        terminated = decoded.done
         self._done = terminated
         self._step_count += 1
         self._episode_rewards.append(raw_reward)
 
         info: dict[str, Any] = {
-            "task_index": int(result.taskIndex()),
-            "task_name": str(result.taskName()),
+            "task_index": decoded.task_index,
+            "task_name": decoded.task_name,
             "step": self._step_count,
             "raw_reward": raw_reward,
+            # CMDP fields (G1.1): R_energy objective + C_SLA constraint cost.
+            "reward_energy": float(raw_reward[0]),
+            "cost": raw_cost,
         }
 
         if terminated:
@@ -252,9 +334,16 @@ class CloudSimEnv(gym.Env):
 
         ``True`` at index ``i`` means host ``i`` can accept the current task.
         MaskablePPO calls this automatically each step.
+
+        On the packed transport (SYS.2) the mask arrived with the last
+        step/reset blob, so this is a local read. On the legacy transport it
+        costs 1+H round trips, which is why it showed up as ~3.5 ms at H=10 in
+        the profile.
         """
-        java_mask = self._ep.getActionMask()
-        mask = np.array(list(java_mask), dtype=bool)
+        if self._cached_mask is not None:
+            mask = self._cached_mask.copy()
+        else:
+            mask = np.array(list(self._ep.getActionMask()), dtype=bool)
 
         # Safety: if no host is feasible, allow all (prevent stuck episode)
         if not mask.any():
@@ -274,6 +363,10 @@ class CloudSimEnv(gym.Env):
             "mean_energy_reward": float(rewards[:, 0].mean()),
             "mean_sla_reward": float(rewards[:, 1].mean()),
             "total_energy_kwh": float(self._ep.getTotalEnergyKwh()),
+            # G1.1 — CMDP constraint cost for the episode (Σ C_SLA). Read from
+            # Java as the authoritative value; equals the locally summed cost.
+            "total_sla_cost": float(self._ep.getSlaCost()),
+            "total_sla_cost_local": self._episode_cost,
         }
 
     # ── Metrics export ────────────────────────────────────────────────

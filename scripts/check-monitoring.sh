@@ -74,6 +74,22 @@ json_field() {
                     | head -n1 | tr -d '"'
 }
 
+# Health of ONE Prometheus scrape target, by job name.
+#
+# The /api/v1/targets body is a single line containing every target, so a naive
+# grep -E '"job":"X".*"health":"up"' matches ACROSS target boundaries: job X is
+# reported UP whenever ANY later target is up. That produced a false PASS for
+# the (actually down) rl_agent exporter. Splitting on '{' puts each target
+# object on its own chunk so the match is scoped correctly.
+target_health() {
+  local job="$1"; local body="$2"
+  echo "$body" \
+    | tr '{' '\n' \
+    | grep -A20 "\"job\":\"${job}\"" \
+    | grep -oE '"health":"[a-z]+"' \
+    | head -n1 | cut -d'"' -f4
+}
+
 # ── 1. Java exporter ──────────────────────────────────────────────────────
 
 section "1. Java exporter — ${JAVA_URL}/metrics"
@@ -108,21 +124,23 @@ section "2. Prometheus targets — ${PROM_URL}/api/v1/targets"
 if fetch "${PROM_URL}/api/v1/targets" body; then
   pass "Prometheus targets API reachable"
 
-  if echo "$body" | grep -qE '"job":"cloudsim_java".*"health":"up"' \
-       || echo "$body" | grep -qE '"health":"up".*"job":"cloudsim_java"'; then
+  java_health=$(target_health cloudsim_java "$body")
+  if [[ "$java_health" == "up" ]]; then
     pass "Scrape target cloudsim_java is UP"
   else
-    fail "Scrape target cloudsim_java is NOT up — check prometheus.yml + container network"
+    fail "Scrape target cloudsim_java is ${java_health:-missing} — check prometheus.yml + container network"
     last_err=$(echo "$body" | grep -oE '"lastError":"[^"]*"' | head -n1)
     [[ -n "$last_err" ]] && info "Prometheus says: ${last_err}"
   fi
 
   if echo "$body" | grep -qE '"job":"rl_agent"'; then
-    if echo "$body" | grep -qE '"job":"rl_agent".*"health":"up"' \
-         || echo "$body" | grep -qE '"health":"up".*"job":"rl_agent"'; then
+    rl_health=$(target_health rl_agent "$body")
+    if [[ "$rl_health" == "up" ]]; then
       pass "Scrape target rl_agent is UP (Phase 2 / training run active)"
     else
-      info "Scrape target rl_agent is DOWN — expected when no training run is active."
+      info "Scrape target rl_agent is ${rl_health:-missing} — expected when no training run is active."
+      info "If a run IS active, it must be started with 'docker compose run --use-aliases'"
+      info "(without it the container has no 'rl-agent' DNS alias and can never be scraped)."
     fi
   fi
 else
@@ -144,10 +162,14 @@ if fetch "$query_url" body; then
               | tr -d '"')
   if [[ -n "${count_val:-}" && "$count_val" -gt 0 ]]; then
     pass "Prometheus has eldas_host_cpu_util data (${count_val} series, expected ≥ 1)"
-    if [[ "$count_val" -ge 10 ]]; then
-      pass "All 10 host series are present (count=${count_val})"
+    # Expected host count comes from NUM_HOSTS (same default as SimulationConfig),
+    # never a hardcoded 10 — a 50-host topology sweep would otherwise fail a
+    # check that has nothing to do with monitoring health.
+    expected_hosts="${NUM_HOSTS:-10}"
+    if [[ "$count_val" -ge "$expected_hosts" ]]; then
+      pass "All ${expected_hosts} host series are present (count=${count_val})"
     else
-      info "Only ${count_val} host series in Prometheus — partial run? (full DC = 10)"
+      info "Only ${count_val} host series vs NUM_HOSTS=${expected_hosts} — partial run, or stale series from an earlier topology."
     fi
   else
     fail "No data for eldas_host_cpu_util yet — Java side may not have scheduled any task."

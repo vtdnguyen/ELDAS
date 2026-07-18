@@ -61,6 +61,25 @@ public class GatewayEntryPoint {
         // run. Safe no-op when monitoring is disabled.
         MetricsRegistry.setContext(scenario.name(), "rl");
 
+        // Reclaim the PREVIOUS episode's manager before replacing it.
+        //
+        // This reset builds a *new* SimulationManager (see below), so the old
+        // one's terminateExisting() never runs — the new instance's simThread is
+        // null, and the old stepping thread is left blocked forever on an
+        // actionQueue nobody will ever write to. Being a daemon it never blocks
+        // JVM exit, so it stays invisible: measured +1 live "cloudsim-step"
+        // thread and ~1.4 MB RSS *per reset* (60 resets ⇒ 94→154 threads,
+        // 256→340 MB), because each stranded thread also pins its whole CloudSim
+        // graph against GC. Harmless over a handful of episodes; fatal for a
+        // budget sweep that runs hundreds of episodes across dozens of runs.
+        //
+        // shutdown() interrupts the stepping thread and terminates that
+        // episode's CloudSim instance. Episodes are independent, so reclaiming
+        // the finished one cannot affect any result.
+        if (manager != null) {
+            manager.shutdown();
+        }
+
         // T7.1 — Use the env-driven constructor so NUM_HOSTS / VCPU_PER_HOST /
         // GPU_PER_HOST / RAM_PER_HOST_GB (and T8.1 state-machine knobs) are
         // re-read on every resetSimulation(). The fromEnv() call inside
@@ -109,6 +128,62 @@ public class GatewayEntryPoint {
     }
 
     /**
+     * SYS.2 — No-op round-trip probe used to measure raw Py4J RPC latency.
+     *
+     * <p>Does no simulation work whatsoever, so the wall-clock time Python
+     * measures around this call is (by construction) the pure JVM↔Python
+     * round-trip cost. Subtracting it from the measured {@link #step(int)} time
+     * decomposes a step into <em>transport</em> vs <em>simulation</em> without
+     * needing any timing instrumentation on the Java side.
+     *
+     * <p>This is the evidence gate for SYS.2: batching several {@code step}
+     * calls into one RPC only pays off if transport is a real share of the step
+     * budget. See {@code rl-agent/src/perf/profile_step.py}.
+     *
+     * @return the argument, echoed back (keeps the call from being optimised away)
+     */
+    public int ping(int value) {
+        return value;
+    }
+
+    /**
+     * SYS.2 — {@link #step(int)} with the whole payload packed into one blob.
+     *
+     * <p>Returns exactly the same numbers as {@link #step(int)}; the difference
+     * is purely transport. Py4J passes {@code byte[]} by value, so Python gets
+     * the observation, reward, cost, done flag, task index, task name AND the
+     * next action mask in a <b>single</b> round trip instead of ~76 (one per
+     * array element — see {@link StepCodec} for the measurement). Python decodes
+     * it with {@code state_builder.decode_packed}.
+     *
+     * @param hostIndex 0-based index into the host list
+     * @return {@link StepCodec} blob for the resulting state
+     */
+    public byte[] stepPacked(int hostIndex) {
+        requireManager();
+        StepResult result = manager.step(hostIndex);
+        return StepCodec.encode(result, manager.getActionMask());
+    }
+
+    /**
+     * SYS.2 — {@link #reset(String, long)} returning a {@link StepCodec} blob.
+     * Same values as {@code reset}, one round trip.
+     */
+    public byte[] resetPacked(String scenarioName, long seed) {
+        StepResult result = reset(scenarioName, seed);
+        return StepCodec.encode(result, manager.getActionMask());
+    }
+
+    /**
+     * SYS.2 — Capability probe. Lets Python detect the packed transport at
+     * connect time and fall back to the per-element path against an older
+     * gateway (or a test double) instead of crashing on a missing method.
+     */
+    public boolean supportsPackedTransport() {
+        return true;
+    }
+
+    /**
      * Shut down the simulation cleanly.
      * Called from Python or from the JVM shutdown hook.
      */
@@ -154,6 +229,17 @@ public class GatewayEntryPoint {
     public double getTotalEnergyKwh() {
         requireManager();
         return manager.getTotalEnergyKwh();
+    }
+
+    /**
+     * G1.1 — Episode-cumulative Constrained-MDP constraint cost
+     * {@code C_SLA = Σ κ·max(0, completion − deadline)} (≥ 0). Consumed by the
+     * Python CMDP layer (PID-Lagrangian) as the constrained quantity
+     * {@code E[C_SLA] ≤ d}.
+     */
+    public double getSlaCost() {
+        requireManager();
+        return manager.getSlaCost();
     }
 
     /** Number of tasks in the current episode. */
@@ -263,7 +349,30 @@ public class GatewayEntryPoint {
     public static GatewayServer startServer(GatewayEntryPoint entryPoint) {
         int port = Integer.parseInt(
                 System.getenv().getOrDefault("PY4J_PORT", "25333"));
+        return startServer(entryPoint, port);
+    }
 
+    /**
+     * SYS.1 — Start a GatewayServer on an explicit port.
+     *
+     * <p>Used by {@link Main} to bring up {@code NUM_GATEWAYS} independent
+     * gateways in a single JVM (ports {@code PY4J_PORT … PY4J_PORT+N−1}), one
+     * per {@code SubprocVecEnv} worker. This is safe because
+     * {@link SimulationManager} holds <b>no static state</b> — every gateway
+     * owns its own manager, CloudSim instance, host list, energy accumulators
+     * and stepping thread, so the simulations cannot interfere.
+     *
+     * <p><b>Caveat:</b> {@link MetricsRegistry} <i>is</i> a static façade. With
+     * more than one gateway its gauges are written by every simulation at once
+     * and become meaningless (they are not labelled per gateway). Monitoring is
+     * opt-in and off the critical path (CLAUDE.md Lưu ý #16), so {@code Main}
+     * warns rather than failing — but do not read Grafana during a parallel run.
+     *
+     * @param entryPoint the entry point object exposed to Python
+     * @param port       TCP port to bind
+     * @return the running GatewayServer instance
+     */
+    public static GatewayServer startServer(GatewayEntryPoint entryPoint, int port) {
         InetAddress bindAddress;
         try {
             bindAddress = InetAddress.getByName("0.0.0.0");

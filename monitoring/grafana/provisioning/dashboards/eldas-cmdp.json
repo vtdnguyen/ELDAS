@@ -1,0 +1,198 @@
+{
+  "annotations": {"list": []},
+  "description": "GĐ2 — Constrained MDP + PID-Lagrangian telemetry (G1.6) plus the T8.2 host state-machine view. λ / J / d come from the ephemeral Python exporter (rl-agent:8000, only live during a training run started with --use-aliases --prometheus); host state comes from the long-running Java exporter (cloudsim-java:9091).",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "id": 100, "type": "row",
+      "title": "Dual variable — is the constraint binding?",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "collapsed": false, "panels": []
+    },
+    {
+      "id": 1, "type": "stat",
+      "title": "λ (Lagrange multiplier)",
+      "description": "λ = 0 ⇒ budget is slack (constraint inactive). λ > 0 ⇒ constraint is binding; KKT complementary slackness says J should sit at d.",
+      "gridPos": {"h": 5, "w": 5, "x": 0, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A", "expr": "eldas_lambda"}],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 5,
+        "thresholds": {"mode": "absolute", "steps": [
+          {"color": "blue", "value": null},
+          {"color": "green", "value": 0.000001}]}}},
+      "options": {"colorMode": "background", "graphMode": "area", "textMode": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2, "type": "stat",
+      "title": "J (episodic cost, normalised)",
+      "description": "The constraint statistic actually fed to pid.update(J, d).",
+      "gridPos": {"h": 5, "w": 5, "x": 5, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A", "expr": "eldas_episode_cost_sla"}],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 4}},
+      "options": {"colorMode": "value", "graphMode": "area", "textMode": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 3, "type": "stat",
+      "title": "d (SLA budget)",
+      "description": "Constant for the run. One d ⇒ one converged policy ⇒ one point on the Pareto front (G2.5).",
+      "gridPos": {"h": 5, "w": 5, "x": 10, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A", "expr": "eldas_budget_d"}],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 4}},
+      "options": {"colorMode": "none", "graphMode": "none", "textMode": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 4, "type": "stat",
+      "title": "Constraint gap Δ = J − d",
+      "description": "The PID error signal. Δ → 0 from above is convergence; a persistently positive Δ with a growing λ means the budget may be infeasible.",
+      "gridPos": {"h": 5, "w": 9, "x": 15, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A", "expr": "eldas_episode_cost_sla - eldas_budget_d"}],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 5,
+        "thresholds": {"mode": "absolute", "steps": [
+          {"color": "green", "value": null},
+          {"color": "orange", "value": 0.01},
+          {"color": "red", "value": 0.05}]}}},
+      "options": {"colorMode": "background", "graphMode": "area", "textMode": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 10, "type": "timeseries",
+      "title": "λ trajectory — must be monotone-ish and settle, not oscillate",
+      "description": "Oscillation ⇒ lower K_I or raise --dual-every (two-timescale separation, Lưu ý #6).",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "eldas_lambda", "legendFormat": "λ"},
+        {"refId": "B", "expr": "eldas_pid_integral", "legendFormat": "PID integral (vanilla-Lagrangian part)"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 6,
+        "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 5,
+                   "showPoints": "never", "spanNulls": true}}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+                  "tooltip": {"mode": "multi", "sort": "none"}}
+    },
+    {
+      "id": 11, "type": "timeseries",
+      "title": "J vs budget d — the convergence plot",
+      "description": "J should be driven down onto d when the constraint binds.",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "eldas_episode_cost_sla", "legendFormat": "J (normalised cost)"},
+        {"refId": "B", "expr": "eldas_budget_d", "legendFormat": "d (budget)"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "none", "decimals": 4,
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 0,
+                     "showPoints": "never", "spanNulls": true}},
+        "overrides": [{
+          "matcher": {"id": "byFrameRefID", "options": "B"},
+          "properties": [
+            {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 10]}},
+            {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]
+        }]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+                  "tooltip": {"mode": "multi", "sort": "none"}}
+    },
+    {
+      "id": 12, "type": "timeseries",
+      "title": "R_energy vs raw C_SLA — the tradeoff being purchased",
+      "description": "Tightening d should trade energy reward away for lower SLA cost. Raw cost is in physical weighted-tardiness units (right axis).",
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 14},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "eldas_episode_reward_energy", "legendFormat": "R_energy"},
+        {"refId": "B", "expr": "eldas_episode_cost_sla_raw", "legendFormat": "C_SLA (raw)"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "none",
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 5,
+                     "showPoints": "never", "spanNulls": true}},
+        "overrides": [{
+          "matcher": {"id": "byFrameRefID", "options": "B"},
+          "properties": [{"id": "custom.axisPlacement", "value": "right"}]
+        }]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+                  "tooltip": {"mode": "multi", "sort": "none"}}
+    },
+    {
+      "id": 200, "type": "row",
+      "title": "Host state machine (Java exporter) — energy gradient source",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 21},
+      "collapsed": false, "panels": []
+    },
+    {
+      "id": 20, "type": "state-timeline",
+      "title": "Per-host state timeline (0=SUSPENDED, 1=IDLE, 2=ACTIVE)",
+      "description": "T8.2. The suspend/wake mechanism is what creates the energy gradient (Lưu ý #12) — this panel is how you confirm it is still alive after a topology change.",
+      "gridPos": {"h": 9, "w": 14, "x": 0, "y": 22},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A", "expr": "eldas_host_state", "legendFormat": "host {{host_id}}"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {"lineWidth": 0, "fillOpacity": 85},
+          "mappings": [{"type": "value", "options": {
+            "0": {"text": "SUSPENDED", "color": "dark-blue",  "index": 0},
+            "1": {"text": "IDLE",      "color": "orange",     "index": 1},
+            "2": {"text": "ACTIVE",    "color": "green",      "index": 2}}}]
+        }
+      },
+      "options": {"showValue": "never", "mergeValues": true, "alignValue": "left",
+                  "rowHeight": 0.9,
+                  "legend": {"displayMode": "list", "placement": "bottom", "showLegend": false},
+                  "tooltip": {"mode": "single", "sort": "none"}}
+    },
+    {
+      "id": 21, "type": "timeseries",
+      "title": "Cluster state counts — how many hosts are off?",
+      "gridPos": {"h": 9, "w": 10, "x": 14, "y": 22},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A", "expr": "eldas_host_state_count", "legendFormat": "{{state}}"}],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 0,
+        "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 40,
+                   "stacking": {"mode": "normal", "group": "A"},
+                   "showPoints": "never", "spanNulls": true}}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+                  "tooltip": {"mode": "multi", "sort": "none"}}
+    },
+    {
+      "id": 22, "type": "timeseries",
+      "title": "Wake-ups (SUSPENDED→ACTIVE) per minute",
+      "description": "Each wake-up costs WAKE_ENERGY_KWH plus WAKE_LATENCY_SEC of added tardiness — the mechanism the agent learns to avoid.",
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 31},
+      "datasource": {"type": "prometheus", "uid": "eldas-prometheus"},
+      "targets": [{"refId": "A",
+        "expr": "sum by (scenario, scheduler) (increase(eldas_total_wakeups_total[1m]))",
+        "legendFormat": "{{scenario}} / {{scheduler}}"}],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 1,
+        "custom": {"drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60,
+                   "showPoints": "never", "spanNulls": true}}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+                  "tooltip": {"mode": "multi", "sort": "none"}}
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["eldas", "cmdp", "phase2"],
+  "templating": {"list": []},
+  "time": {"from": "now-30m", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "ELDAS CMDP — PID-Lagrangian",
+  "uid": "eldas-cmdp",
+  "version": 1,
+  "weekStart": ""
+}

@@ -83,17 +83,20 @@ public class VmAllocationPolicyBestFit extends VmAllocationPolicyAbstract {
      * placement. See class javadoc for the scoring rule.
      */
     public int selectHostForTask(List<Host> hosts, TaskRecord task) {
-        SimulationConfig.HostSpec hs = mgr.hostSpec();
-        int totalPes = hs.pesCount();
-        long totalRam = hs.ramMb();
-        int totalGpu = hs.gpuCount();
-
         int bestIdx = -1;
         double bestScore = -1;
 
         for (int i = 0; i < hosts.size(); i++) {
             Host host = hosts.get(i);
             if (!mgr.canHost(host, task)) continue;
+
+            // G2.1 — per-host capacity so tightness is measured against THIS
+            // host's SKU (a task fills a small CPU-only host more than a big
+            // GPU node), which is exactly what best-fit packing should reward.
+            SimulationConfig.HostSpec hs = mgr.hostSpec(host);
+            int  totalPes = hs.pesCount();
+            long totalRam = hs.ramMb();
+            int  totalGpu = hs.gpuCount();
 
             // Post-placement utilisation per dimension. mgr.freePes returns
             // remaining capacity, so (totalPes − free + task.pes) = usage after.
