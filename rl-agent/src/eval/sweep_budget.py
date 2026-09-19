@@ -31,9 +31,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 try:
     from .aggregate import aggregate_by_method, check_budget_front_monotone, mean_ci95
     from .points import PointRecord, save_points
+    from . import paths
 except ImportError:  # pragma: no cover - direct-script fallback
     from eval.aggregate import aggregate_by_method, check_budget_front_monotone, mean_ci95
     from eval.points import PointRecord, save_points
+    from eval import paths
 
 
 def _parse_floats(s: str) -> list[float]:
@@ -142,6 +144,20 @@ def preflight_gateways(base_port: int, n: int, host: str | None = None) -> None:
     print(f"[sweep] preflight OK: {n} gateway(s) reachable on "
           f"{host}:{base_port}–{base_port + n - 1}")
 
+    # C11/C12 step 1: MetricsRegistry is a static façade, so with more than one gateway in
+    # the JVM every simulation writes the same gauges and the telemetry is a blend of N
+    # runs. Java only warns, and nobody reads a warning from an overnight job — so refuse
+    # here, before the hours are spent, while it is still one env var to change.
+    if n > 1 and os.environ.get("MONITORING_ENABLED", "false").lower() == "true":
+        raise SystemExit(
+            "[sweep] PREFLIGHT FAILED: MONITORING_ENABLED=true with "
+            f"{n} gateways.\n"
+            "  MetricsRegistry is static: N simulations write one set of gauges, so every\n"
+            "  exported metric would be a meaningless blend (CLAUDE.md C11).\n"
+            "  Set MONITORING_ENABLED=false for the sweep (the simulation itself is\n"
+            "  unaffected — monitoring is off the critical path, Lưu ý #16)."
+        )
+
 
 def _run_one_job(args: tuple) -> PointRecord:
     """Train + evaluate a single (budget, seed). Runs in a worker process.
@@ -150,7 +166,7 @@ def _run_one_job(args: tuple) -> PointRecord:
     per process — that is how each concurrent run gets its own simulation.
     """
     (d, seed, scenario, total_timesteps, k_p, k_i, k_d, dual_every,
-     output_dir, model_dir) = args
+     output_dir, model_dir, cost_freeze_after) = args
 
     from train_cmdp import evaluate_cmdp, train_cmdp  # lazy: needs sb3
 
@@ -161,10 +177,11 @@ def _run_one_job(args: tuple) -> PointRecord:
     _, pid, conv = train_cmdp(
         scenario=scenario, seed=seed, total_timesteps=total_timesteps,
         budget_d=d, k_p=k_p, k_i=k_i, k_d=k_d, dual_every=dual_every,
-        out_path=model_path,
+        cost_freeze_after=cost_freeze_after, out_path=model_path,
     )
     row = evaluate_cmdp(model_path, scenario, seed, d, pid,
-                        Path(output_dir) / f"baseline-{scenario}" / tag)
+                        Path(output_dir) / f"baseline-{scenario}" / tag,
+                        cost_freeze_after=cost_freeze_after)
     return PointRecord(
         method=tag, scenario=scenario, seed=seed,
         energy_kwh=float(row["total_energy_kwh"]),
@@ -172,8 +189,17 @@ def _run_one_job(args: tuple) -> PointRecord:
         extra={
             "budget_d": d,
             "lambda_final": float(pid.lambda_),
-            "constraint": conv.get("constraint"),
-            "j_tail_mean": conv.get("j_tail_mean"),
+            # These keys must match convergence_summary() exactly. They did not:
+            # "constraint"/"j_tail_mean" are not keys it returns, so every point
+            # ever written carried null for both and the sweep kept no record of
+            # whether its own policies had converged - the one thing the budget
+            # front depends on (Luu y #7).
+            "constraint_active": conv.get("constraint_active"),
+            "j_tail_mean": conv.get("J_tail_mean"),
+            "constraint_gap": conv.get("constraint_gap"),
+            "lambda_rel_std": conv.get("lambda_rel_std"),
+            "n_dual_updates": conv.get("n_updates"),
+            "dropped_tasks": int(row.get("dropped_tasks", 0)),
         },
     )
 
@@ -202,6 +228,7 @@ def run_sweep(
     model_dir: Path,
     parallel: int = 1,
     base_port: int | None = None,
+    cost_freeze_after: int | None = None,
 ) -> list[PointRecord]:
     """Train + evaluate one CMDP policy per (budget, seed); return the points.
 
@@ -221,7 +248,7 @@ def run_sweep(
 
     payloads = [
         (d, seed, scenario, total_timesteps, k_p, k_i, k_d, dual_every,
-         str(output_dir), str(model_dir))
+         str(output_dir), str(model_dir), cost_freeze_after)
         for d, seed in jobs
     ]
 
@@ -249,9 +276,12 @@ def run_sweep(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="G2.5 — SLA-budget sweep → Pareto front")
-    ap.add_argument("--scenario", default="LOW", choices=["LOW", "HIGH", "BURST"])
-    ap.add_argument("--budgets", default="0.02,0.04,0.06,0.08,0.10",
-                    help="comma-separated SLA budgets d (tight → loose)")
+    ap.add_argument("--scenario", default="LOW", help="LOW|HIGH|BURST slice the configured trace; with TRACE_PATTERN set, any generated scenario (incl. OVERLOAD, REPLAY) selects its own file")
+    ap.add_argument("--budgets", default=None,
+                    help="comma-separated SLA budgets d (tight -> loose). REQUIRED: the "
+                         "old 0.02-0.10 grid predates the W1.5 deadline floor and the W3 "
+                         "drop charge, which both rescaled C_SLA, so there is no safe "
+                         "default left. Probe the feasible floor first (PLAN W6.1).")
     ap.add_argument("--seeds", default="42",
                     help="comma-separated seeds (≥5 required for reportable CI)")
     ap.add_argument("--total-timesteps", type=int, default=50_000)
@@ -259,6 +289,10 @@ def main() -> None:
     ap.add_argument("--k-i", type=float, default=0.05)
     ap.add_argument("--k-d", type=float, default=0.0)
     ap.add_argument("--dual-every", type=int, default=1)
+    ap.add_argument("--cost-freeze-after", type=int, default=None, metavar="N",
+                    help="Freeze the constraint scale after N cost samples so J "
+                         "tracks the LEVEL of C_SLA instead of its shape. "
+                         "Without it the budget d cannot steer the run.")
     ap.add_argument("--output", default="/data/results")
     ap.add_argument("--models", default="/data/models")
     ap.add_argument("--parallel", type=int, default=1,
@@ -269,6 +303,20 @@ def main() -> None:
                     help="First gateway port (default: $GATEWAY_PORT).")
     args = ap.parse_args()
 
+    # R5/R6: refuse to write WM-1 output onto the LEGACY results.
+    paths.guard_results_root(args.output, what="sweep budget")
+
+    if not args.budgets:
+        raise SystemExit(
+            "[sweep] --budgets is required.\n"
+            "  The previous default (0.02,0.04,0.06,0.08,0.10) was calibrated before the\n"
+            "  W1.5 absolute deadline floor and the W3 drop charge. Both changed the SCALE\n"
+            "  of C_SLA, so that grid now sits somewhere arbitrary on the new axis - most\n"
+            "  likely entirely inside the slack region, where every budget converges to the\n"
+            "  SAME policy and the 'Pareto front' is one point drawn five times.\n"
+            "  Run the W6.1 pilot to find the feasible SLA floor for this scenario, then\n"
+            "  pass a grid straddling it."
+        )
     budgets = _parse_floats(args.budgets)
     seeds = _parse_ints(args.seeds)
     out_dir = Path(args.output)
@@ -283,10 +331,12 @@ def main() -> None:
         k_p=args.k_p, k_i=args.k_i, k_d=args.k_d, dual_every=args.dual_every,
         output_dir=out_dir, model_dir=Path(args.models),
         parallel=args.parallel, base_port=args.base_port,
+        cost_freeze_after=args.cost_freeze_after,
     )
 
     sweep_dir = out_dir / f"sweep-{args.scenario}"
-    save_points(points, sweep_dir / "points.jsonl")
+    # merge: chạy thêm hạt giống KHÔNG được xoá hạt giống đã có (xem points.save_points)
+    save_points(points, sweep_dir / "points.jsonl", merge=True)
     summary = summarise_sweep(points)
     print_sweep_summary(summary)
     with open(sweep_dir / "sweep_summary.json", "w") as f:

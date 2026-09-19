@@ -35,12 +35,14 @@ import numpy as np
 try:
     from . import topology as topo_mod
     from . import trace_loader
+    from . import paths
     from .static_model import StaticPlacementModel
 except ImportError:  # pragma: no cover - direct-script fallback
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from eval import topology as topo_mod
     from eval import trace_loader
+    from eval import paths
     from eval.static_model import StaticPlacementModel
 
 
@@ -196,8 +198,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="NSGA-II static reference Pareto front (energy vs SLA)"
     )
-    parser.add_argument("--scenario", default="LOW", choices=["LOW", "HIGH", "BURST"])
-    parser.add_argument("--trace", default="/data/trace/openb_pod_list_default.csv")
+    parser.add_argument(
+        "--scenario", default="LOW",
+        help="LOW | HIGH | BURST slice the configured trace; with TRACE_PATTERN set, "
+             "any generated scenario (incl. OVERLOAD, REPLAY) selects its own file",
+    )
+    parser.add_argument(
+        "--trace", default=None,
+        help="explicit trace CSV; overrides TRACE_PATTERN / TRACE_FILE",
+    )
     parser.add_argument(
         "--topology", default=os.environ.get("TOPOLOGY_CONFIG") or None,
         help="topology JSON (default: homogeneous / TOPOLOGY_CONFIG env)",
@@ -217,17 +226,31 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
+    # R5/R6: refuse to write WM-1 output onto the LEGACY results.
+    paths.guard_results_root(args.output, what="the NSGA-II front")
+
     seed = args.seed if args.seed is not None else int(os.environ.get("RANDOM_SEED", "42"))
 
     hosts = topo_mod.load_hosts(args.topology, args.num_hosts)
+
+    # W2.4 — resolve exactly like the simulator does. The reference front is only
+    # meaningful if it is computed on the *same* workload the measured points come
+    # from; reading the legacy trace here while the DES runs WM-1 would make every
+    # hypervolume and IGD+ comparison against this front a comparison of two different
+    # experiments.
+    trace_path = trace_loader.resolve_trace_path(args.scenario, seed, trace=args.trace)
+    patterned = trace_loader.uses_trace_pattern() and not args.trace
+    filter_label = trace_loader.PASSTHROUGH if patterned else args.scenario
     tasks = trace_loader.filter_scenario(
-        trace_loader.read_trace(args.trace), args.scenario
+        trace_loader.read_trace(trace_path), filter_label
     )
     if args.max_tasks and len(tasks) > args.max_tasks:
         # Even stride keeps the arrival-time spread (better than head slice).
         idx = np.linspace(0, len(tasks) - 1, args.max_tasks).astype(int)
         tasks = [tasks[i] for i in np.unique(idx)]
 
+    print(f"[nsga2] trace={trace_path}"
+          f"{' (WM-1, used whole)' if patterned else f' (legacy slice {args.scenario})'}")
     print(f"[nsga2] scenario={args.scenario} hosts={len(hosts)} "
           f"({'hetero' if args.topology else 'homogeneous'}) tasks={len(tasks)} "
           f"pop={args.pop_size} gen={args.n_gen} seed={seed}")
@@ -253,6 +276,8 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "scenario": args.scenario,
+        "trace": trace_path,
+        "trace_mode": "wm1" if patterned else "legacy-slice",
         "topology": args.topology or "homogeneous",
         "num_hosts": len(hosts),
         "num_tasks": len(tasks),

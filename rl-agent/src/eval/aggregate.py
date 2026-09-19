@@ -82,11 +82,17 @@ def aggregate_by_method(points, scenario: str | None = None) -> dict[str, dict]:
 
     out: dict[str, dict] = {}
     for method, recs in groups.items():
+        # W3/W6.1 — mean tasks dropped, when the producer recorded it. Kept as None
+        # (not 0) when absent: "no drops" and "nobody measured drops" must not print
+        # the same, or an old points file silently claims a clean run.
+        drops = [float(r.extra["dropped_tasks"]) for r in recs
+                 if r.extra and r.extra.get("dropped_tasks") is not None]
         out[method] = {
             "energy": mean_ci95([r.energy_kwh for r in recs]),
             "sla": mean_ci95([r.sla_cost for r in recs]),
             "seeds": sorted({r.seed for r in recs}),
             "n": len(recs),
+            "dropped": (sum(drops) / len(drops)) if drops else None,
         }
     return out
 
