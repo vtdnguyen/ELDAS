@@ -12,7 +12,7 @@ import java.util.*;
 
 /**
  * Standalone validation runner — empirically demonstrates the bugs catalogued
- * in {@code assets/report/java-validation-report.md}.
+ * in {@code docs/archive/phase1-dacn/docs/java-validation-report.md}.
  *
  * <p>Each {@code testBxx_…} method asserts something about the production code
  * and prints {@code [PASS] Bxx — description} (bug confirmed) or
@@ -58,6 +58,10 @@ public final class ValidationRunner {
         testB17_HeterogeneousTopologyAndAffinity();
         testB18_StepCodecPacksLosslessly();
         testB19_ResetDoesNotLeakSteppingThreads();
+        testB20_DeadlineHasAnAbsoluteFloor();
+        testB21_TraceResolutionIsSafe();
+        testB22_GeneratedTraceMatchesItsManifest();
+        testB23_DroppedTasksAreCharged();
 
         banner("Summary");
         String topo = System.getenv("TOPOLOGY_CONFIG");
@@ -84,7 +88,7 @@ public final class ValidationRunner {
     private static void testB7_HighFilterIsNoOp() {
         try {
             List<TaskRecord> all = AlibabaTraceReader.read(SimulationConfig.TRACE_FILE);
-            List<TaskRecord> high = ScenarioFilter.filter(all, Scenario.HIGH, 42);
+            List<TaskRecord> high = ScenarioFilter.filter(all, Scenario.LEGACY_HIGH, 42);
             long nonPending = all.stream().filter(t -> !"Pending".equals(t.podPhase())).count();
             assertEq("B7", "HIGH size == all non-Pending size", nonPending, (long) high.size());
         } catch (Exception e) {
@@ -167,7 +171,7 @@ public final class ValidationRunner {
         SimulationManager m = new SimulationManager(
                 SimulationConfig.DEFAULT_DC,
                 SimulationConfig.TRACE_FILE,
-                Scenario.LOW,
+                Scenario.LEGACY_LOW,
                 42L);
         m.resetSimulation();
         int hostCount = m.getHostCount();
@@ -194,7 +198,7 @@ public final class ValidationRunner {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             m.resetSimulation();
 
@@ -234,7 +238,7 @@ public final class ValidationRunner {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             m.resetSimulation();
 
@@ -281,7 +285,7 @@ public final class ValidationRunner {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             m.resetSimulation();
 
@@ -324,14 +328,14 @@ public final class ValidationRunner {
     //  so values exceeded 1.0. Post-fix the snapshot clamps per-host before
     //  averaging, matching the energy model's clamp.
     //  NOT YET FIXED: averaging snapshots by count instead of by time —
-    //  see assets/report/java-validation-report.md mục 2.5.
+    //  see docs/archive/phase1-dacn/docs/java-validation-report.md mục 2.5.
     // ──────────────────────────────────────────────────────────────────────
     private static void testB5_AvgCpuUtilFormula() {
         try {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             m.resetSimulation();
 
@@ -365,7 +369,7 @@ public final class ValidationRunner {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             m.resetSimulation();
 
@@ -417,7 +421,7 @@ public final class ValidationRunner {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             m.resetSimulation();
             Field f = SimulationManager.class.getDeclaredField("episodeDone");
@@ -445,7 +449,7 @@ public final class ValidationRunner {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             m.resetSimulation();
 
@@ -546,7 +550,7 @@ public final class ValidationRunner {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             m.resetSimulation();
 
@@ -586,7 +590,7 @@ public final class ValidationRunner {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             m.resetSimulation();
 
@@ -638,7 +642,7 @@ public final class ValidationRunner {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             m.resetSimulation();
 
@@ -716,7 +720,7 @@ public final class ValidationRunner {
             SimulationManager m = new SimulationManager(
                     SimulationConfig.DEFAULT_DC,
                     SimulationConfig.TRACE_FILE,
-                    Scenario.LOW,
+                    Scenario.LEGACY_LOW,
                     42L);
             StepResult first = m.resetSimulation();
 
@@ -844,7 +848,7 @@ public final class ValidationRunner {
             obs[0] = 1.0;                          // a value with a known bit pattern
 
             var result = new SimulationManager.StepResult(
-                    obs, new double[]{-3.25, -7.5}, 7.5, true, 13, "pod-xyz");
+                    obs, new double[]{-3.25, -7.5}, 7.5, true, 13, "pod-xyz", 4);
             boolean[] mask = {false, true, true};
 
             byte[] blob = StepCodec.encode(result, mask);
@@ -855,11 +859,14 @@ public final class ValidationRunner {
             assertEq("B18a3", "header: taskIndex", 13, buf.getInt());
             assertEq("B18a4", "header: numHosts", h, buf.getInt());
             assertEq("B18a5", "header: obsLen = 6H+4", obsLen, buf.getInt());
+            // W3.1 — droppedTasks joined the header in wire v2, which is why the
+            // observation moved from byte 14 to byte 18 and VERSION went to 2.
+            assertEq("B18a6", "header: droppedTasks (W3.1)", 4, buf.getInt());
 
-            // (b) Observation starts at byte 14 and is big-endian: 1.0 must be
+            // (b) Observation starts at byte 18 and is big-endian: 1.0 must be
             // 3F F0 00 00 00 00 00 00, which is what Python reads as '>f8'.
-            assertEq("B18b1", "observation begins at offset 14", 14, buf.position());
-            byte[] first = java.util.Arrays.copyOfRange(blob, 14, 22);
+            assertEq("B18b1", "observation begins at offset 18", 18, buf.position());
+            byte[] first = java.util.Arrays.copyOfRange(blob, 18, 26);
             assertTrue("B18b2", "observation[0]=1.0 encoded big-endian (3F F0 ...)",
                     java.util.Arrays.equals(first, new byte[]{
                             (byte) 0x3F, (byte) 0xF0, 0, 0, 0, 0, 0, 0}));
@@ -890,7 +897,7 @@ public final class ValidationRunner {
                     "pod-xyz", new String(nameBytes, java.nio.charset.StandardCharsets.UTF_8));
 
             // (f) nothing left over: the blob is exactly the documented size.
-            int expectedSize = 14 + 8 * obsLen + 16 + 8 + h + 4 + "pod-xyz".length();
+            int expectedSize = 18 + 8 * obsLen + 16 + 8 + h + 4 + "pod-xyz".length();
             assertEq("B18f1", "blob size matches the layout exactly", expectedSize, blob.length);
             assertEq("B18f2", "decoder consumes the whole blob (no trailing bytes)",
                     0, buf.remaining());
@@ -948,7 +955,7 @@ public final class ValidationRunner {
                     10, gpuHeavyHost, gpuHeavyPow, 1.0, skus);
 
             SimulationManager m = new SimulationManager(
-                    hetSpec, SimulationConfig.TRACE_FILE, Scenario.LOW, 42L);
+                    hetSpec, SimulationConfig.TRACE_FILE, Scenario.LEGACY_LOW, 42L);
             m.resetSimulation();
             List<Host> hosts = m.getHosts();
 
@@ -1039,6 +1046,469 @@ public final class ValidationRunner {
     private static void assertTrue(String tag, String desc, boolean cond) {
         if (cond) pass(tag, desc);
         else      fail(tag, desc);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  B20 (W1.5) — the deadline carries an absolute floor, not only a
+    //  bounded-slowdown allowance.
+    //
+    //  Before the floor, 24.6 % of tasks tolerated under 60 s of lateness and
+    //  the median LS budget was 237 s, so the fixed 5 s wake latency was a large
+    //  share of the whole budget: suspending a host to save energy scored as an
+    //  SLA violation regardless of load, entangling the two objectives through an
+    //  artefact of job length.
+    //
+    //  This test also emits a checksum over the whole trace so the Python mirrors
+    //  (workload/deadline.py, eval/qos.py) can be verified to compute bit-identical
+    //  deadlines — a cross-language contract, like StepCodec (CLAUDE.md Lưu ý #17).
+    // ──────────────────────────────────────────────────────────────────────
+    private static void testB20_DeadlineHasAnAbsoluteFloor() {
+        try {
+            List<TaskRecord> all = AlibabaTraceReader.read(SimulationConfig.TRACE_FILE);
+            List<TaskRecord> sched = ScenarioFilter.filter(all, Scenario.LEGACY_HIGH, 42);
+
+            // Floors must be ordered: a stricter class tolerates less lateness.
+            double ls   = SimulationConfig.qosToSlackFloorSec("LS");
+            double guar = SimulationConfig.qosToSlackFloorSec("Guaranteed");
+            double burst= SimulationConfig.qosToSlackFloorSec("Burstable");
+            double be   = SimulationConfig.qosToSlackFloorSec("BE");
+            assertTrue("B20a", "slack floors ordered LS < Guaranteed < Burstable < BE",
+                    ls < guar && guar < burst && burst < be);
+            assertTrue("B20b", "every class tolerates at least 100 s",
+                    ls >= 100.0 && guar >= 100.0 && burst >= 100.0 && be >= 100.0);
+            assertTrue("B20c", "LS floor exceeds the wake latency by a wide margin",
+                    ls > 10.0 * SimulationConfig.DEFAULT_POWER.wakeLatencySec());
+
+            int under60 = 0;
+            double minBudget = Double.MAX_VALUE;
+            double checksum = 0.0;
+            for (TaskRecord t : sched) {
+                double budget = t.deadline() - t.creationTime() - t.duration();
+                if (budget < 60.0) under60++;
+                minBudget = Math.min(minBudget, budget);
+                checksum += t.deadline();
+            }
+
+            System.out.printf("       floors: LS=%.0f Guaranteed=%.0f Burstable=%.0f BE=%.0f s%n",
+                    ls, guar, burst, be);
+            System.out.printf("       n=%d, min budget=%.1f s, budget<60s: %d%n",
+                    sched.size(), minBudget, under60);
+            System.out.printf("       deadline checksum = %.6f%n", checksum);
+
+            assertTrue("B20d", "no task tolerates less than 60 s of lateness",
+                    under60 == 0);
+            assertTrue("B20e", "minimum absolute budget is at least the LS floor",
+                    minBudget >= ls - 1e-9);
+        } catch (Exception e) {
+            fail("B20", e.toString());
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  B21 (W2.1/W2.2) — trace resolution is backward compatible and fails loudly.
+    //
+    //  Every property here guards against the same class of accident: a run that
+    //  completes normally against the wrong workload. That produces a full set of
+    //  plausible numbers and no error, which is the most expensive failure mode
+    //  this project has (PLAN-Workload-Model.md risks R5/R6).
+    // ──────────────────────────────────────────────────────────────────────
+    private static void testB21_TraceResolutionIsSafe() {
+        try {
+            boolean patterned = SimulationConfig.usesTracePattern();
+
+            if (!patterned) {
+                // Phase-1 path: unchanged for every scenario and seed.
+                assertTrue("B21a", "no TRACE_PATTERN ⇒ resolution returns TRACE_FILE",
+                        SimulationConfig.resolveTracePath("HIGH", 42)
+                                .equals(SimulationConfig.TRACE_FILE)
+                     && SimulationConfig.resolveTracePath("LOW", 7)
+                                .equals(SimulationConfig.TRACE_FILE));
+            } else {
+                String p = SimulationConfig.resolveTracePath("HIGH", 42);
+                assertTrue("B21a", "TRACE_PATTERN resolves to a readable file — " + p,
+                        java.nio.file.Files.isReadable(java.nio.file.Path.of(p)));
+            }
+
+            // The next two use the explicit-pattern overload rather than poking at env
+            // or system properties: resolve() reads the environment first, so a
+            // property-based override is a no-op whenever TRACE_PATTERN is actually
+            // set — which is exactly when these guards matter most.
+
+            // A pattern without {scenario} maps every scenario onto one file, which
+            // would make LOW, HIGH and BURST the same experiment while still running.
+            boolean threw = false;
+            try {
+                SimulationConfig.resolveTracePath("/data/wm1/homo/seed{seed}.csv",
+                                                  "HIGH", 42);
+            } catch (IllegalStateException expected) {
+                threw = true;
+            }
+            assertTrue("B21b", "pattern without {scenario} is rejected", threw);
+
+            // A missing file must not silently fall back to the legacy trace.
+            threw = false;
+            try {
+                SimulationConfig.resolveTracePath("/nonexistent/{scenario}/seed{seed}.csv",
+                                                  "HIGH", 42);
+            } catch (IllegalStateException expected) {
+                threw = true;
+            }
+            assertTrue("B21c", "unresolvable pattern raises instead of falling back",
+                    threw);
+
+            // An unset pattern is the Phase-1 path regardless of ambient environment.
+            assertTrue("B21f", "null/blank pattern resolves to TRACE_FILE",
+                    SimulationConfig.resolveTracePath(null, "HIGH", 42)
+                            .equals(SimulationConfig.TRACE_FILE)
+                 && SimulationConfig.resolveTracePath("  ", "LOW", 7)
+                            .equals(SimulationConfig.TRACE_FILE));
+
+            // Scenario.NONE must keep exactly the tasks HIGH keeps: a WM-1 file is
+            // already one scenario, so the only filtering left is dropping Pending.
+            List<TaskRecord> all = AlibabaTraceReader.read(SimulationConfig.TRACE_FILE);
+            List<TaskRecord> none = ScenarioFilter.filter(all, Scenario.NONE, 42);
+            List<TaskRecord> high = ScenarioFilter.filter(all, Scenario.LEGACY_HIGH, 42);
+            assertTrue("B21d", "Scenario.NONE is a passthrough (same tasks as HIGH)",
+                    none.size() == high.size() && none.equals(high));
+            assertTrue("B21e", "Scenario.NONE still drops Pending pods",
+                    none.stream().noneMatch(t -> "Pending".equals(t.podPhase())));
+
+            System.out.printf("       TRACE_FILE=%s%n", SimulationConfig.TRACE_FILE);
+            System.out.printf("       TRACE_PATTERN=%s%n",
+                    patterned ? SimulationConfig.tracePattern() : "(unset — Phase-1 path)");
+        } catch (Exception e) {
+            fail("B21", e.toString());
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  B22 (W2.5) — a generated trace carries the offered load its manifest claims.
+    //
+    //  WM-1 calibrates the load in Python; the simulator re-derives it in Java from
+    //  the CSV it actually reads. If the two ever disagree — a units slip, a column
+    //  mis-parsed, the wrong file resolved — every downstream number is measured
+    //  against a workload nobody characterised. Recomputing rho here from the parsed
+    //  TaskRecords closes that loop across the language boundary.
+    //
+    //  rho is the DOMINANT-RESOURCE load, max(rho_cpu, rho_gpu) (PLAN §3.1): the two
+    //  arms bind on different resources, so checking only CPU would pass a hetero
+    //  trace whose GPU load is completely wrong.
+    //
+    //  Skipped when /data/wm1 is not mounted, so the legacy configuration stays green.
+    // ──────────────────────────────────────────────────────────────────────
+    private static void testB22_GeneratedTraceMatchesItsManifest() {
+        final double TOL = 0.02;                       // PLAN W1.4 acceptance
+        try {
+            String root = System.getenv().getOrDefault("WM1_ROOT", "/data/wm1");
+            java.nio.file.Path base = java.nio.file.Path.of(root);
+            if (!java.nio.file.Files.isDirectory(base)) {
+                skip("B22", "no WM-1 traces at " + root
+                        + " — run scripts/gen-workloads.sh to enable this check");
+                return;
+            }
+
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            int checked = 0;
+            double worstErr = 0.0;
+            String worstWhat = "";
+
+            try (var arms = java.nio.file.Files.list(base)) {
+                for (java.nio.file.Path arm : arms.filter(java.nio.file.Files::isDirectory)
+                                                  .sorted().toList()) {
+                    java.nio.file.Path mf = arm.resolve("wm1-manifest.json");
+                    if (!java.nio.file.Files.isReadable(mf)) continue;
+
+                    com.google.gson.JsonObject man = gson.fromJson(
+                            java.nio.file.Files.readString(mf),
+                            com.google.gson.JsonObject.class);
+                    double horizon = man.get("horizon_sec").getAsDouble();
+                    com.google.gson.JsonObject cap = man.getAsJsonObject("capacity");
+                    int totalPes  = cap.get("total_pes").getAsInt();
+                    int totalGpus = cap.get("total_gpus").getAsInt();
+
+                    for (com.google.gson.JsonElement el : man.getAsJsonArray("traces")) {
+                        com.google.gson.JsonObject tr = el.getAsJsonObject();
+                        // REPLAY has no calibrated target; it is whatever the real
+                        // window happened to be, so there is nothing to check it against.
+                        if (tr.get("rho_target").isJsonNull()) continue;
+
+                        java.nio.file.Path csv = arm.resolve(tr.get("path").getAsString());
+                        if (!java.nio.file.Files.isReadable(csv)) {
+                            fail("B22", "manifest lists a missing trace: " + csv);
+                            return;
+                        }
+
+                        List<TaskRecord> tasks = AlibabaTraceReader.read(csv.toString());
+                        if (tasks.size() != tr.get("n_task").getAsInt()) {
+                            fail("B22", csv + ": manifest says " + tr.get("n_task").getAsInt()
+                                    + " tasks, file has " + tasks.size());
+                            return;
+                        }
+
+                        double wCpu = 0.0, wGpu = 0.0;
+                        for (TaskRecord t : tasks) {
+                            wCpu += t.pesNeeded() * t.duration();
+                            wGpu += t.numGpu()    * t.duration();
+                        }
+                        double rho = Math.max(wCpu / (totalPes * horizon),
+                                totalGpus > 0 ? wGpu / (totalGpus * horizon) : 0.0);
+                        double target = tr.get("rho_target").getAsDouble();
+                        double err = Math.abs(rho - target) / target;
+                        if (err > worstErr) {
+                            worstErr = err;
+                            worstWhat = tr.get("arm").getAsString() + "/"
+                                      + tr.get("scenario").getAsString() + "/seed"
+                                      + tr.get("seed").getAsInt();
+                        }
+                        checked++;
+                    }
+                }
+            }
+
+            if (checked == 0) {
+                skip("B22", "found " + root + " but no calibrated traces in it");
+                return;
+            }
+
+            System.out.printf("       %d generated traces checked; worst rho error "
+                            + "%.3f%% at %s%n", checked, 100 * worstErr, worstWhat);
+            assertTrue("B22a", "every generated trace carries its manifest's task count "
+                    + "and rho within " + (int) (100 * TOL) + "%", worstErr <= TOL);
+        } catch (Exception e) {
+            fail("B22", e.toString());
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  B23 (W3.1 / W3.3, PLAN §3.9) — an unplaceable task is CHARGED, not free.
+    //
+    //  Before W3 the `target == null` branch returned reward {0,0} and touched
+    //  neither C_SLA nor any counter. Two consequences, both fatal for Phase-2
+    //  numbers: dropping a task was strictly cheaper than scheduling it (the
+    //  constraint could be satisfied by shedding load rather than placing it
+    //  well), and the shortfall was invisible — a run that silently dropped a
+    //  third of the trace reported a *better* energy figure, because the tasks
+    //  it never ran drew no power.
+    //
+    //  (a) drives the same trace on a normal cluster and on a deliberately tiny
+    //      one, so the only difference is placeability;
+    //  (b) pins the charge to κ·(T − creation) task by task — the formula, not
+    //      just its sign;
+    //  (c) checks the charge dominates what the task would have paid if placed,
+    //      which is the property that closes the loophole;
+    //  (d) confirms Σ step-cost == getSlaCost() still holds (B16's invariant must
+    //      survive the new cost channel);
+    //  (e-h) W3.3 acceptance on the calibrated WM-1 traces — see the block comment
+    //      there for why "HIGH drops nothing" turned out to be unreachable and what
+    //      replaced it. Skipped when /data/wm1 is not mounted.
+    // ──────────────────────────────────────────────────────────────────────
+
+    /** Run a whole episode with step(0) (⇒ first-feasible fallback); returns the manager. */
+    private static SimulationManager runEpisode(SimulationConfig.DatacenterSpec dc,
+                                                String trace, Scenario sc, long seed,
+                                                double[] outSummedStepCost,
+                                                double[] outWorstUnderCharge) {
+        SimulationManager m = new SimulationManager(dc, trace, sc, seed);
+        m.resetSimulation();
+        double summed = 0.0;
+        double worstUnder = Double.POSITIVE_INFINITY;   // min(dropCharge − κ·duration)
+        int prevDropped = 0;
+        while (!m.isDone()) {
+            int idxBefore = m.getCurrentTaskIndex();
+            var task = m.getTasks().get(idxBefore);
+            StepResult r = m.step(0);
+            summed += r.cost();
+
+            if (r.droppedTasks() > prevDropped) {
+                // This step is the one that dropped `task`. Re-derive the charge
+                // independently of the code under test.
+                double expected = task.qosWeight()
+                        * Math.max(0.0, m.getEpisodeHorizonSec() - task.creationTime());
+                if (Math.abs(r.cost() - expected) > 1e-6) {
+                    fail("B23b", String.format(
+                            "drop charge for %s is %.3f, expected kappa*(T-creation)=%.3f",
+                            task.name(), r.cost(), expected));
+                }
+                worstUnder = Math.min(worstUnder,
+                        r.cost() - task.qosWeight() * task.duration());
+            }
+            prevDropped = r.droppedTasks();
+            if (r.done()) break;
+        }
+        if (outSummedStepCost != null) outSummedStepCost[0] = summed;
+        if (outWorstUnderCharge != null) outWorstUnderCharge[0] = worstUnder;
+        return m;
+    }
+
+    private static void testB23_DroppedTasksAreCharged() {
+        try {
+            // ── (a) same trace, two cluster sizes ────────────────────────────
+            double[] sumBig = new double[1];
+            SimulationManager big = runEpisode(SimulationConfig.DEFAULT_DC,
+                    SimulationConfig.TRACE_FILE, Scenario.LEGACY_LOW, 42L, sumBig, null);
+            double costBig = big.getSlaCost();
+            int droppedBig = big.getDroppedTasks();
+            big.shutdown();
+
+            // One host with a single PE and 1 GB of RAM: almost nothing fits.
+            SimulationConfig.HostSpec tinyHost = new SimulationConfig.HostSpec(
+                    1, SimulationConfig.DEFAULT_HOST.mips(), 1024L,
+                    SimulationConfig.DEFAULT_HOST.bwMbps(),
+                    SimulationConfig.DEFAULT_HOST.storageMb(), 0,
+                    SimulationConfig.DEFAULT_HOST.gpuMemoryMb());
+            SimulationConfig.DatacenterSpec tinyDc = new SimulationConfig.DatacenterSpec(
+                    1, tinyHost, SimulationConfig.DEFAULT_POWER, 1.0);
+
+            double[] sumTiny = new double[1];
+            double[] worstUnder = new double[1];
+            SimulationManager tiny = runEpisode(tinyDc,
+                    SimulationConfig.TRACE_FILE, Scenario.LEGACY_LOW, 42L,
+                    sumTiny, worstUnder);
+            double costTiny = tiny.getSlaCost();
+            int droppedTiny = tiny.getDroppedTasks();
+            int nTasks = tiny.getTasks().size();
+            tiny.shutdown();
+
+            System.out.printf("       10-host: dropped=%d, C_SLA=%.1f | "
+                            + "1-host-1-PE: dropped=%d/%d, C_SLA=%.1f%n",
+                    droppedBig, costBig, droppedTiny, nTasks, costTiny);
+
+            assertTrue("B23a1", "an undersized cluster actually drops tasks "
+                    + "(otherwise the rest of B23 proves nothing)", droppedTiny > 0);
+            assertTrue("B23a2",
+                    "dropping is NOT cheaper than scheduling: C_SLA rises from "
+                  + String.format("%.1f to %.1f when tasks stop fitting", costBig, costTiny),
+                    costTiny > costBig);
+
+            // ── (c) the charge dominates any placement charge ────────────────
+            // Every drop was charged at least kappa*duration, and a placed task can
+            // never be charged that much (see SimulationManager.dropCost).
+            assertTrue("B23c", "every drop charge covers at least kappa*duration "
+                            + "(margin " + String.format("%.1f", worstUnder[0]) + ")",
+                    worstUnder[0] >= -1e-6);
+
+            // ── (d) B16's accounting invariant survives the new cost channel ──
+            assertTrue("B23d", "sum of step costs == getSlaCost() with drops present",
+                    Math.abs(sumTiny[0] - costTiny) <= 1e-6);
+
+            // ── (e-h) W3.3 acceptance on the calibrated WM-1 traces ──────────
+            //
+            // The plan originally asked for `dropped == 0` on HIGH. Measurement says that
+            // is unreachable and says why: the simulator has NO ADMISSION QUEUE — a task
+            // is placed at its arrival instant or never — while rho = 0.85 is a *time
+            // average*. Under MMPP-2 arrivals the instantaneous demand exceeds 640 PEs
+            // regardless of how well the tasks are packed. All five classical baselines
+            // drop 1.8-7.1 % of HIGH across seeds 42-46 (best-fit lowest, K8s highest),
+            // and none reaches zero. So the criterion below is what the model can actually
+            // support, and it is stronger than a bare bound in one respect: it separates
+            // the two causes.
+            //
+            //   LOW  (rho = 0.30)  -> 0 drops, every policy, every seed. This is the
+            //                        "the calibration is achievable" check HIGH was meant
+            //                        to be; a non-zero here IS a workload bug.
+            //   HIGH (rho = 0.85)  -> a small bounded share, reported, never silent.
+            //   BURST              -> strictly MORE than HIGH although it carries the SAME
+            //                        job multiset at the SAME rho (the split-RNG paired
+            //                        design). That isolates arrival burstiness as the
+            //                        cause: same work, same load, different concentration.
+            //   OVERLOAD (1.25)    -> more still, and flagged if it passes 20 % (risk R10).
+            String root = System.getenv().getOrDefault("WM1_ROOT", "/data/wm1");
+            java.nio.file.Path low  = java.nio.file.Path.of(root, "homo", "LOW", "seed42.csv");
+            java.nio.file.Path high = java.nio.file.Path.of(root, "homo", "HIGH", "seed42.csv");
+            java.nio.file.Path burst = java.nio.file.Path.of(root, "homo", "BURST", "seed42.csv");
+            java.nio.file.Path over = java.nio.file.Path.of(root, "homo", "OVERLOAD", "seed42.csv");
+            if (!java.nio.file.Files.isReadable(low) || !java.nio.file.Files.isReadable(high)
+                    || !java.nio.file.Files.isReadable(burst)
+                    || !java.nio.file.Files.isReadable(over)) {
+                skip("B23e", "no WM-1 homo traces under " + root
+                        + " — run scripts/gen-workloads.sh to enable the W3.3 acceptance");
+                return;
+            }
+
+            // Scenario.NONE: a WM-1 file IS the scenario and must not be re-sliced.
+            int[] dropped = new int[4];
+            int[] total = new int[4];
+            java.nio.file.Path[] files = {low, high, burst, over};
+            String[] labels = {"LOW", "HIGH", "BURST", "OVERLOAD"};
+            for (int i = 0; i < files.length; i++) {
+                SimulationManager m = runEpisode(SimulationConfig.DEFAULT_DC,
+                        files[i].toString(), Scenario.NONE, 42L, null, null);
+                dropped[i] = m.getDroppedTasks();
+                total[i] = m.getTasks().size();
+                m.shutdown();
+            }
+
+            StringBuilder line = new StringBuilder("       WM-1 homo (first-fit driver):");
+            for (int i = 0; i < files.length; i++) {
+                line.append(String.format(" %s %d/%d (%.1f%%)", labels[i], dropped[i],
+                        total[i], 100.0 * dropped[i] / Math.max(1, total[i])));
+            }
+            System.out.println(line);
+
+            assertEq("B23e", "homo/LOW (rho=0.30) places every task — a drop at moderate "
+                    + "load would mean the workload itself is not placeable", 0, dropped[0]);
+
+            double highRate = (double) dropped[1] / Math.max(1, total[1]);
+            assertTrue("B23f", String.format(
+                    "homo/HIGH (rho=0.85) drops a bounded, reported share (%.1f%% <= 10%%) "
+                  + "— there is no admission queue, so a burst above 640 PEs must go "
+                  + "somewhere", 100 * highRate),
+                    highRate <= 0.10);
+
+            assertTrue("B23g", String.format(
+                    "burstiness alone drives drops: BURST %d > HIGH %d at the SAME rho and "
+                  + "the SAME job multiset", dropped[2], dropped[1]),
+                    dropped[2] > dropped[1]);
+
+            assertTrue("B23h", "homo/OVERLOAD (rho=1.25) drops more than HIGH and reports it",
+                    dropped[3] > dropped[1]);
+
+            // Risk R10: OVERLOAD is only interpretable while most of it still runs.
+            double dropRate = (double) dropped[3] / Math.max(1, total[3]);
+            if (dropRate > 0.20) {
+                System.out.printf("       [R10] OVERLOAD drop rate %.1f%% exceeds 20%% — "
+                        + "consider lowering rho toward 1.00 (PLAN risk register)%n",
+                        100 * dropRate);
+            }
+
+            // ── (i) the heterogeneous arm has a POLICY-INDEPENDENT drop floor ──
+            //
+            // Measured across all five classical baselines on hetero/HIGH/seed42: 118, 119,
+            // 119, 119, 120 drops — a spread of 2 out of ~1 377 tasks. That flatness is the
+            // point. With only 18 GPU cards, a GPU task arriving while all 18 are busy has
+            // nowhere to go, so the drop count is a property of the *workload against the
+            // cluster*, not of the packing decision. Placement still moves energy and
+            // tardiness on this arm; it does not move drops.
+            //
+            // Worth a check rather than only a note: if a future change made hetero/HIGH
+            // suddenly placeable, the calibration would have silently drifted.
+            java.nio.file.Path hetHigh =
+                    java.nio.file.Path.of(root, "hetero", "HIGH", "seed42.csv");
+            java.nio.file.Path topo = java.nio.file.Path.of("/config/topology-hetero.json");
+            if (!java.nio.file.Files.isReadable(hetHigh)
+                    || !java.nio.file.Files.isReadable(topo)) {
+                skip("B23i", "hetero trace or /config/topology-hetero.json not mounted");
+                return;
+            }
+            SimulationConfig.DatacenterSpec hetDc =
+                    TopologyConfig.load(topo.toString(), SimulationConfig.DEFAULT_DC);
+            SimulationManager mHet = runEpisode(hetDc, hetHigh.toString(),
+                    Scenario.NONE, 42L, null, null);
+            int dHet = mHet.getDroppedTasks();
+            int nHet = mHet.getTasks().size();
+            mHet.shutdown();
+
+            System.out.printf("       WM-1 hetero/HIGH: dropped=%d/%d (%.1f%%) — "
+                            + "GPU-bound, ~identical under every baseline%n",
+                    dHet, nHet, 100.0 * dHet / Math.max(1, nHet));
+            assertTrue("B23i", String.format(
+                    "hetero/HIGH drops more than homo/HIGH at the same nominal rho "
+                  + "(%.1f%% vs %.1f%%): 18 cards, not packing quality, is the binding "
+                  + "constraint", 100.0 * dHet / Math.max(1, nHet), 100 * highRate),
+                    (double) dHet / Math.max(1, nHet) > highRate);
+        } catch (Exception e) {
+            fail("B23", e.toString());
+        }
     }
 
     private static void pass(String tag, String msg) {

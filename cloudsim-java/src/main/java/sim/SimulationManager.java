@@ -139,6 +139,20 @@ public class SimulationManager {
 
     private double cumulativeCpuEnergyWs;  // Watt-seconds
     private double cumulativeGpuEnergyWs;
+    /**
+     * Cluster energy already paid for by a previous step's reward.
+     *
+     * <p>R_energy is the CLUSTER-WIDE energy delta between consecutive steps,
+     * which is what {@code getTotalEnergyKwh()} reports and therefore what the
+     * agent is scored on. The previous formulation charged the chosen host's
+     * INSTANTANEOUS power instead, which is a different quantity and, measured,
+     * an anti-aligned one: across the five baseline policies the correlation
+     * between real kWh and summed reward was +0.97 where it must be about -1.
+     * Packing onto a busy host looked expensive (high instantaneous power) even
+     * though it is exactly what lets other hosts suspend and saves energy, so
+     * the agent was trained to spread. Tracking the delta removes the bias.
+     */
+    private double lastRewardedEnergyWs;
     private double cumulativeWakeEnergyWs; // T8.1 — one-shot wake-up bonuses
     private double lastEnergyTimestamp;
     private int    totalWakeups;           // T8.1 — counter for state-machine telemetry
@@ -159,6 +173,31 @@ public class SimulationManager {
      */
     private double cumulativeSlaCost;
 
+    /**
+     * W3.1 — Number of tasks this episode could not place on ANY host
+     * (PLAN-Workload-Model.md §3.9, problem E).
+     *
+     * <p>Before W3 a dropped task returned {@code reward = {0, 0}} and added
+     * nothing to {@code C_SLA}, which made dropping strictly <i>cheaper</i> than
+     * scheduling: the agent could shed the constraint by steering tasks at a
+     * cluster region where nothing fits. Worse, the under-count was largest
+     * exactly where the constraint matters most — on the heterogeneous arm the
+     * GPU demand exceeds capacity 26.9 % of the time at HIGH (peak 3.89×), so
+     * the SLA constraint was blind in its own binding region.
+     */
+    private int droppedTasks;
+
+    /**
+     * W3.1 — Episode horizon {@code T}: the latest sim-time at which any task in
+     * this episode could still be running, i.e. {@code max(creation + duration)}
+     * over the filtered trace. Fixed at build time, so the drop charge below is
+     * a property of the workload, not of the trajectory.
+     */
+    private double episodeHorizonSec;
+
+    /** Per-episode cap on individual drop log lines (see the drop branch). */
+    private static final int DROP_LOG_LIMIT = 10;
+
     // ── Thread synchronisation (for RL stepping via Py4J) ──────────────────
 
     private final SynchronousQueue<StepResult> stepResultQueue = new SynchronousQueue<>();
@@ -173,7 +212,8 @@ public class SimulationManager {
         double   cost,         // C_SLA ≥ 0 for THIS step (G1.1, CMDP constraint cost)
         boolean  done,
         int      taskIndex,
-        String   taskName
+        String   taskName,
+        int      droppedTasks  // W3.1 — episode-cumulative count of unplaceable tasks
     ) {}
 
     // ── Constructors ───────────────────────────────────────────────────────
@@ -208,7 +248,7 @@ public class SimulationManager {
 
     /** Convenience constructor with all defaults (HIGH scenario). */
     public SimulationManager() {
-        this(SimulationConfig.TRACE_FILE, Scenario.HIGH,
+        this(SimulationConfig.TRACE_FILE, Scenario.LEGACY_HIGH,
              Long.parseLong(System.getenv().getOrDefault("RANDOM_SEED", "42")));
     }
 
@@ -286,6 +326,22 @@ public class SimulationManager {
      * driven by the PID-Lagrangian dual update on the Python side.
      */
     public double getSlaCost() { return cumulativeSlaCost; }
+
+    /**
+     * W3.1 — Tasks this episode that no host could accept (§3.9). Expected to be
+     * {@code 0} on every calibrated WM-1 scenario except {@code OVERLOAD}; a
+     * non-zero count on LOW/HIGH/BURST means the workload is not actually
+     * placeable on this topology and the run's energy figure is measured over
+     * fewer tasks than the trace contains. Reported explicitly (risk R10) rather
+     * than left for the reader to infer from a shortfall in the energy total.
+     */
+    public int getDroppedTasks() { return droppedTasks; }
+
+    /**
+     * W3.1 — Episode horizon {@code T = max(creation + duration)} (seconds).
+     * Exposed for validators that re-derive the drop charge independently.
+     */
+    public double getEpisodeHorizonSec() { return episodeHorizonSec; }
 
     /** Cumulative one-shot wake-up energy in kWh (subset of getTotalEnergyKwh). */
     public double getWakeEnergyKwh() {
@@ -379,16 +435,27 @@ public class SimulationManager {
             throw new RuntimeException("Failed to load trace: " + traceFile, e);
         }
 
+        // W3.1 — Episode horizon T, used to charge unplaceable tasks (§3.9).
+        // Derived from the trace, before any decision is taken, so the drop
+        // charge cannot depend on the policy being evaluated.
+        episodeHorizonSec = 0.0;
+        for (TaskRecord t : tasks) {
+            episodeHorizonSec = Math.max(episodeHorizonSec,
+                    t.creationTime() + t.duration());
+        }
+
         // 6. Reset counters and per-host state
         currentTaskIdx          = 0;
         episodeDone             = false;
         cumulativeCpuEnergyWs   = 0;
         cumulativeGpuEnergyWs   = 0;
+        lastRewardedEnergyWs    = 0;
         cumulativeWakeEnergyWs  = 0;
         lastEnergyTimestamp     = 0;
         totalWakeups            = 0;
         slaViolationCount       = 0;
         cumulativeSlaCost       = 0;
+        droppedTasks            = 0;
         hostPeUsage.clear();
         hostRamUsage.clear();
         hostZeroLoadSince.clear();
@@ -432,7 +499,8 @@ public class SimulationManager {
                     0.0,                       // no task placed yet → zero cost
                     false,
                     currentTaskIdx,
-                    tasks.isEmpty() ? "" : tasks.get(currentTaskIdx).name()
+                    tasks.isEmpty() ? "" : tasks.get(currentTaskIdx).name(),
+                    0                          // W3.1 — nothing dropped yet
             ));
 
             while (currentTaskIdx < tasks.size()) {
@@ -474,11 +542,40 @@ public class SimulationManager {
                     boolean wokeUp = allocateTask(task, target);
                     reward = computeReward(task, target, wokeUp);
                 } else {
-                    System.err.printf(
-                        "[SimulationManager] Task %s dropped: no feasible host "
-                      + "(needs cpu=%d, ram=%d, gpu=%d)%n",
-                        task.name(), task.pesNeeded(), task.memoryMib(), task.numGpu());
-                    reward = new double[]{0.0, 0.0};
+                    // W3.1 (§3.9) — Charge the drop. See dropCost() for why the
+                    // charge is the whole remaining horizon and not the tardiness
+                    // a placement would have produced.
+                    double dropCost = dropCost(task);
+                    cumulativeSlaCost += dropCost;
+                    droppedTasks++;
+                    // A task that never ran has missed its deadline by definition,
+                    // so it counts as a violation on the same line as a late one.
+                    slaViolationCount++;
+                    MetricsRegistry.incSlaViolation(task.qos());
+
+                    // Log the first few in full, then stop: an OVERLOAD episode
+                    // drops hundreds and a sweep runs hundreds of episodes, so an
+                    // unconditional line per drop buries every other message. The
+                    // total is never lost — it is getDroppedTasks().
+                    if (droppedTasks <= DROP_LOG_LIMIT) {
+                        System.err.printf(
+                            "[SimulationManager] Task %s dropped: no feasible host "
+                          + "(needs cpu=%d, ram=%d, gpu=%d) — charged C_SLA += %.1f%n",
+                            task.name(), task.pesNeeded(), task.memoryMib(), task.numGpu(),
+                            dropCost);
+                    } else if (droppedTasks == DROP_LOG_LIMIT + 1) {
+                        System.err.printf(
+                            "[SimulationManager] … further drops in this episode are "
+                          + "not logged individually; see getDroppedTasks()%n");
+                    }
+                    // The cluster still burned power over the interval leading to
+                    // this arrival, so the step is charged for it exactly as any
+                    // other step. Returning 0 here would not save that energy, it
+                    // would only defer it into the next step's delta.
+                    // R_sla carries the drop charge, which keeps
+                    // stepCost = max(0, −R_sla) and Σ stepCost == getSlaCost()
+                    // true without a special case (B16).
+                    reward = new double[]{-consumeEnergyDelta(), -dropCost};
                 }
 
                 // 3. Advance bookkeeping
@@ -511,7 +608,9 @@ public class SimulationManager {
                         stepCost,
                         episodeDone,
                         currentTaskIdx,
-                        episodeDone ? "" : tasks.get(currentTaskIdx).name()
+                        episodeDone ? "" : tasks.get(currentTaskIdx).name(),
+                        droppedTasks     // W3.1 — cumulative, so the last step
+                                         // carries the episode total
                 ));
             }
         } catch (InterruptedException e) {
@@ -721,31 +820,66 @@ public class SimulationManager {
      * its cost: R_energy gains the wake-up bonus, R_sla integrates the
      * wake-up latency into the completion estimate.
      */
+    /**
+     * W3.1 (§3.9) — Constraint cost charged for a task no host could accept:
+     * {@code κ · (T − creation)}, where {@code T} is the episode horizon.
+     *
+     * <p><b>Why the whole remaining window, not the tardiness of a placement.</b>
+     * The consistent-looking alternative is to pretend the task finished at
+     * {@code T} and charge {@code κ·max(0, T − deadline)}. That reopens the hole
+     * this fix exists to close: a task whose deadline sits beyond {@code T} would
+     * be dropped for <i>free</i>, so shedding it would still beat scheduling it.
+     * Charging from arrival makes the drop charge an upper bound on any charge
+     * the task could have earned by being placed, which is the property the
+     * constraint needs — dropping can never be the cheap way out.
+     *
+     * <p>That bound holds by construction, not by luck. A placed task is charged
+     * {@code κ·max(0, wake + duration·(congestion − slack) − floor)} with
+     * {@code congestion ≤ 2} and {@code slack ≥ 1.1}, so its charge is below
+     * {@code κ·(0.9·duration − 101)} — strictly under {@code κ·duration}, and
+     * {@code T ≥ creation + duration} for every task in the episode. The margin
+     * is asserted end-to-end by ValidationRunner B23.
+     */
+    private double dropCost(TaskRecord task) {
+        return task.qosWeight() * Math.max(0.0, episodeHorizonSec - task.creationTime());
+    }
+
+    /**
+     * Cluster energy drawn since the last time a reward was issued, in Watt-seconds.
+     *
+     * <p>This is the exact increment of the quantity reported by
+     * {@link #getTotalEnergyKwh()} (CPU + GPU + wake-up), so the training signal and
+     * the reported metric are the same number by construction. {@code advanceEnergy}
+     * has already integrated power up to this task's arrival, and {@code allocateTask}
+     * has already booked any wake-up cost, so calling this at reward time captures the
+     * full consequence of the previous placement, including the saving from hosts that
+     * were allowed to suspend.
+     *
+     * <p>Consuming: each Watt-second is charged to exactly one step.
+     */
+    private double consumeEnergyDelta() {
+        double total = cumulativeCpuEnergyWs + cumulativeGpuEnergyWs
+                     + cumulativeWakeEnergyWs;
+        double delta = total - lastRewardedEnergyWs;
+        lastRewardedEnergyWs = total;
+        return delta;
+    }
+
     private double[] computeReward(TaskRecord task, Host host, boolean wokeUp) {
         SimulationConfig.PowerSpec ps = powerOf(host);           // G2.1 per-host
         int pesPerHost = specOf(host).pesCount();                // G2.1 per-host
 
-        // ── R_energy: incremental energy from this allocation ──
-        int usedPes = hostPeUsage.getOrDefault(host, 0);
-        double cpuUtil = Math.min(1.0, (double) usedPes / pesPerHost);
-        double cpuPower = ps.cpuIdlePowerWatt()
-                + (ps.cpuMaxPowerWatt() - ps.cpuIdlePowerWatt()) * cpuUtil;
-        GpuState gpu = gpuRegistry.get(host);
-        double gpuPower = (gpu != null)
-                ? DatacenterFactory.gpuPowerWatt(gpu, ps)
-                : 0.0;
-        double deltaEnergy = (cpuPower + gpuPower) * dcSpec.schedulingIntervalSec();
-        if (wokeUp) {
-            // Wake-up bonus in Watt-seconds, so it lives on the same scale
-            // as deltaEnergy — agent feels the hit directly.
-            deltaEnergy += ps.wakeEnergyKwh() * 3_600_000.0;
-        }
-        double rEnergy = -deltaEnergy;
+        // ── R_energy: cluster-wide energy drawn since the previous step ──
+        // Charged over the whole cluster, not just the chosen host: keeping a
+        // host suspended is the main energy lever in this model, and no
+        // per-host quantity can see it. See consumeEnergyDelta().
+        double rEnergy = -consumeEnergyDelta();
 
         // ── R_sla: penalty for estimated deadline miss ──
         //
         // Contention proxy: how loaded was the host BEFORE this task arrived?
         // bgUsedPes = current usage minus what we just added.
+        int usedPes = hostPeUsage.getOrDefault(host, 0);
         int bgUsedPes = Math.max(0, usedPes - task.pesNeeded());
         double bgUtil = Math.min(1.0, (double) bgUsedPes / pesPerHost);
         double congestionFactor = 1.0 + bgUtil;

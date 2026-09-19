@@ -49,17 +49,39 @@ public class GatewayEntryPoint {
     /**
      * (Re)initialise the simulation and return the first {@link StepResult}.
      *
-     * @param scenarioName "LOW", "HIGH", or "BURST"
+     * @param scenarioName Without {@code TRACE_PATTERN}: "LOW", "HIGH" or "BURST" —
+     *                     a slice of the single configured trace. With it: any label
+     *                     the pattern can resolve, e.g. "OVERLOAD" or "REPLAY", and the
+     *                     file is used whole (W2.2).
      * @param seed         random seed for reproducibility
      * @return StepResult with initial observation (reward = [0,0], done = false)
      */
     public StepResult reset(String scenarioName, long seed) {
-        Scenario scenario = Scenario.valueOf(scenarioName.toUpperCase(Locale.ROOT));
+        String label = scenarioName.toUpperCase(Locale.ROOT);
+
+        // W2.2 — Where does this episode's workload come from?
+        //
+        // Without TRACE_PATTERN nothing changes: one trace file, sliced by the
+        // Phase-1 ScenarioFilter. With it, WM-1 has already produced one file per
+        // (scenario, seed), so the file *is* the scenario and must not be sliced
+        // again — hence Scenario.NONE. That also frees the scenario label from the
+        // enum, which is what lets OVERLOAD and REPLAY exist at all.
+        String tracePath = SimulationConfig.resolveTracePath(label, seed);
+        Scenario scenario;
+        // fromLabel keeps the wire protocol stable across the W2.3 rename: callers
+        // still send "LOW"/"HIGH"/"BURST" and get the LEGACY_ slices.
+        scenario = SimulationConfig.usesTracePattern()
+                ? Scenario.NONE
+                : Scenario.fromLabel(label);
 
         // T5.3 — Tag the upcoming episode for Prometheus. Scheduler defaults
         // to "rl"; selectBaselineAction overrides it if a baseline drives the
         // run. Safe no-op when monitoring is disabled.
-        MetricsRegistry.setContext(scenario.name(), "rl");
+        //
+        // Tag with the caller's label, not the filter enum: under TRACE_PATTERN every
+        // episode would otherwise report as "NONE" and the dashboards could not tell
+        // HIGH from BURST.
+        MetricsRegistry.setContext(label, "rl");
 
         // Reclaim the PREVIOUS episode's manager before replacing it.
         //
@@ -84,8 +106,7 @@ public class GatewayEntryPoint {
         // GPU_PER_HOST / RAM_PER_HOST_GB (and T8.1 state-machine knobs) are
         // re-read on every resetSimulation(). The fromEnv() call inside
         // SimulationManager.buildSimulation handles parsing and fallbacks.
-        manager = new SimulationManager(
-                SimulationConfig.TRACE_FILE, scenario, seed);
+        manager = new SimulationManager(tracePath, scenario, seed);
 
         StepResult result = manager.resetSimulation();
 
@@ -100,9 +121,13 @@ public class GatewayEntryPoint {
         bestFitPolicy    = new VmAllocationPolicyBestFit(manager);
         roundRobinPolicy = new VmAllocationPolicyRoundRobin(manager);
 
+        // Print the resolved trace whenever a pattern is in play: an operator must be
+        // able to confirm from the log which workload actually ran, without inferring
+        // it from an env var they believe they set.
         System.out.printf("[GatewayEntryPoint] Reset: scenario=%s, seed=%d, "
-                        + "hosts=%d, tasks=%d%n",
-                scenario, seed, manager.getHostCount(), manager.getTasks().size());
+                        + "hosts=%d, tasks=%d%s%n",
+                label, seed, manager.getHostCount(), manager.getTasks().size(),
+                SimulationConfig.usesTracePattern() ? (", trace=" + tracePath) : "");
 
         return result;
     }
@@ -240,6 +265,18 @@ public class GatewayEntryPoint {
     public double getSlaCost() {
         requireManager();
         return manager.getSlaCost();
+    }
+
+    /**
+     * W3.1 (§3.9) — Tasks in this episode that no host could accept. Each one is
+     * charged {@code κ·(T − creation)} into {@link #getSlaCost()}, so dropping is
+     * never cheaper than scheduling; this counter is how a caller tells "the
+     * policy kept the cluster feasible" from "the workload did not fit at all",
+     * which the SLA cost alone cannot distinguish.
+     */
+    public int getDroppedTasks() {
+        requireManager();
+        return manager.getDroppedTasks();
     }
 
     /** Number of tasks in the current episode. */

@@ -123,7 +123,90 @@ public final class SimulationConfig {
     );
 
     // ── Trace file path (inside Docker container) ─────────────────────────
-    public static final String TRACE_FILE = "/data/trace/openb_pod_list_default.csv";
+    //
+    // W2.1 — env-overridable. Leaving TRACE_FILE unset reproduces the Phase-1
+    // behaviour byte for byte, which is what every existing result depends on.
+
+    /** Fallback when neither TRACE_FILE nor TRACE_PATTERN is set. */
+    public static final String DEFAULT_TRACE_FILE = "/data/trace/openb_pod_list_default.csv";
+
+    public static final String TRACE_FILE =
+            stringParam("TRACE_FILE", "eldas.trace_file", DEFAULT_TRACE_FILE);
+
+    // ── W2.2 — per-scenario trace resolution ──────────────────────────────
+    //
+    // WM-1 emits one file per (arm, scenario, seed), so a run needs to pick the
+    // right one at reset() time rather than read a single fixed path:
+    //
+    //     TRACE_PATTERN=/data/wm1/homo/{scenario}/seed{seed}.csv
+    //
+    // Unset ⇒ resolveTracePath() returns TRACE_FILE and nothing changes.
+
+    /** Placeholder replaced with the scenario label, e.g. HIGH / OVERLOAD / REPLAY. */
+    public static final String TRACE_PATTERN_SCENARIO = "{scenario}";
+    /** Placeholder replaced with the episode seed. */
+    public static final String TRACE_PATTERN_SEED = "{seed}";
+
+    /** The configured pattern, or {@code null} when running on a single trace file. */
+    public static String tracePattern() {
+        return resolve("TRACE_PATTERN", "eldas.trace_pattern");
+    }
+
+    /** True when traces are selected per scenario rather than read from one file. */
+    public static boolean usesTracePattern() {
+        return tracePattern() != null;
+    }
+
+    /**
+     * Resolve the trace for one episode.
+     *
+     * <p>Two failure modes are turned into exceptions rather than fallbacks, because
+     * both would otherwise produce a complete, plausible-looking run against the wrong
+     * workload — the most expensive kind of mistake this project can make:
+     *
+     * <ul>
+     *   <li>a pattern without {@code {scenario}} would resolve every scenario to the
+     *       same file, so LOW, HIGH and BURST would silently be the same experiment;</li>
+     *   <li>a resolved path that does not exist would, under a silent fallback, quietly
+     *       run the legacy trace while the operator believes WM-1 is in use.</li>
+     * </ul>
+     *
+     * @param scenario scenario label (case preserved as given by the caller)
+     * @param seed     episode seed
+     * @return absolute path of the trace to load
+     */
+    public static String resolveTracePath(String scenario, long seed) {
+        return resolveTracePath(tracePattern(), scenario, seed);
+    }
+
+    /**
+     * Same as {@link #resolveTracePath(String, long)} but with the pattern supplied
+     * explicitly, so the resolution rules can be exercised without depending on the
+     * ambient environment. {@code pattern == null} means "no pattern configured".
+     */
+    static String resolveTracePath(String pattern, String scenario, long seed) {
+        if (pattern == null || pattern.isBlank()) {
+            return TRACE_FILE;
+        }
+        if (!pattern.contains(TRACE_PATTERN_SCENARIO)) {
+            throw new IllegalStateException(
+                    "TRACE_PATTERN='" + pattern + "' has no " + TRACE_PATTERN_SCENARIO
+                  + " placeholder, so every scenario would resolve to the same file. "
+                  + "Use e.g. /data/wm1/homo/" + TRACE_PATTERN_SCENARIO
+                  + "/seed" + TRACE_PATTERN_SEED + ".csv");
+        }
+        String path = pattern
+                .replace(TRACE_PATTERN_SCENARIO, scenario)
+                .replace(TRACE_PATTERN_SEED, Long.toString(seed));
+        if (!java.nio.file.Files.isReadable(java.nio.file.Path.of(path))) {
+            throw new IllegalStateException(
+                    "TRACE_PATTERN resolved to '" + path + "' which is not readable "
+                  + "(scenario=" + scenario + ", seed=" + seed + "). Generate it with "
+                  + "scripts/gen-workloads.sh, or unset TRACE_PATTERN to use "
+                  + TRACE_FILE + ".");
+        }
+        return path;
+    }
 
     // ── Env-var driven builder (T7.1) ─────────────────────────────────────
 
@@ -246,6 +329,11 @@ public final class SimulationConfig {
         return null;
     }
 
+    private static String stringParam(String envName, String propName, String dflt) {
+        String s = resolve(envName, propName);
+        return (s == null) ? dflt : s;
+    }
+
     private static int intParam(String envName, String propName, int dflt) {
         String s = resolve(envName, propName);
         if (s == null) return dflt;
@@ -309,5 +397,57 @@ public final class SimulationConfig {
             case "BE"         -> 3.0;   // Best-Effort — essentially uncapped
             default           -> 1.5;
         };
+    }
+
+    // ── W1.5 — absolute deadline floor (PLAN-Workload-Model.md §3.8) ──────
+    //
+    // The multiplicative slack above is a *bounded slowdown* SLO ("this job may
+    // take at most f(qos)× as long as on an idle cluster"), which is the standard
+    // formulation. On its own, though, it gives short jobs a vanishing absolute
+    // budget: measured on the openb trace, 24.6 % of tasks tolerate under 60 s and
+    // the median LS budget is 237 s. For those the fixed 5 s wake latency is a
+    // large share of the whole budget, so suspending a host to save energy scores
+    // as an SLA violation regardless of load — the energy axis and the SLA axis
+    // become entangled through an artefact of job length.
+    //
+    // The floor decouples them:
+    //
+    //     deadline = creation + duration·slackFactor(qos) + slackFloor(qos)
+    //     slackFloor(qos) = SCHEDULING_LAG_P90_SEC · floorFactor(qos)
+    //
+    // SCHEDULING_LAG_P90_SEC is measured, not chosen: the p90 of
+    // (scheduled_time − creation_time) over the 7 255 schedulable openb pods.
+    //
+    // One GLOBAL percentile scaled per class, not a per-class percentile: the rare
+    // classes are too thin to estimate from (Guaranteed n=7 with p90 = 1 s,
+    // Burstable n=98 with p90 = 1 s), and a per-class estimate times a per-class
+    // factor yields 2 s for Guaranteed against 107 s for LS — it *inverts* the QoS
+    // ordering it exists to express.
+    //
+    // Resulting budgets: LS 106 s < Guaranteed 212 s < Burstable 530 s < BE 2120 s;
+    // over the trace min 107 s, p50 553 s, 0 % below 60 s. The constraint stays
+    // binding (violation rate 33–49 % across background-utilisation levels), so
+    // C_SLA does not collapse to zero.
+    //
+    // MIRRORED IN rl-agent/src/workload/deadline.py AND rl-agent/src/eval/qos.py —
+    // change all three together or ValidationRunner B16b fails.
+
+    /** p90 of the observed scheduling lag in the openb trace (seconds). */
+    public static final double SCHEDULING_LAG_P90_SEC = 106.0;
+
+    /** Multiplier on {@link #SCHEDULING_LAG_P90_SEC}; stricter class ⇒ less slack. */
+    public static double qosToFloorFactor(String qos) {
+        return switch (qos) {
+            case "LS"         -> 1.0;
+            case "Guaranteed" -> 2.0;
+            case "Burstable"  -> 5.0;
+            case "BE"         -> 20.0;
+            default           -> 1.5;
+        };
+    }
+
+    /** Absolute lateness a class tolerates regardless of how short the job is. */
+    public static double qosToSlackFloorSec(String qos) {
+        return SCHEDULING_LAG_P90_SEC * qosToFloorFactor(qos);
     }
 }

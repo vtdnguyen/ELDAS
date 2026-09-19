@@ -133,8 +133,17 @@ public final class AlibabaTraceReader {
             // achieves slack = 0 by definition (see java-validation-report
             // §B4). Tying the deadline to slackFactor(qos) lets stricter
             // classes (LS) act as the contention signal for the RL agent.
+            //
+            // W1.5 — plus an absolute floor. The multiplicative term alone leaves
+            // 24.6 % of tasks with under 60 s of budget, where the fixed 5 s wake
+            // latency dominates, so energy-saving suspends register as SLA
+            // violations independently of load. See SimulationConfig
+            // §"absolute deadline floor" for the measurement and PLAN-Workload-
+            // Model.md §3.8 for the argument.
             double rawDuration = Math.max(0, deletion - Math.max(creation, scheduled));
-            double deadline    = creation + rawDuration * SimulationConfig.qosToSlackFactor(qos);
+            double deadline    = creation
+                               + rawDuration * SimulationConfig.qosToSlackFactor(qos)
+                               + SimulationConfig.qosToSlackFloorSec(qos);
 
             double qosWeight = SimulationConfig.qosToWeight(qos);
 
