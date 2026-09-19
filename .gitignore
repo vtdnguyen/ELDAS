@@ -1,14 +1,39 @@
+# ── Bí mật và cấu hình máy cá nhân ────────────────────────────────────────
 .env
-.pytest_cache
-
 .vscode/
-CLAUDE.md
 .claude/
 
-assets/
-assets_v2/
+# ── Dữ liệu và mô hình: quá lớn cho git ───────────────────────────────────
+# Vết tải gốc tải bằng scripts/download-trace.sh; dữ liệu tải WM-1 sinh lại
+# bằng scripts/gen-workloads.sh (mã băm nằm trong {arm}/wm1-manifest.json).
 data/
+*.zip
+*.tar.gz
+*.pt
+*.pth
+*.onnx
 
-# Alibaba trace data (large CSV — download via scripts/download-trace.sh)
-data/alibaba-trace/
+# ── Tài liệu nội bộ: KHÔNG đẩy lên remote, chỉ giữ ở máy ───────────────────
+# Chỉ README.md được đẩy lên.
+CLAUDE.md
 Tracking_detail.md
+BAO-CAO-TONG-KET.md
+SLIDE-BAO-VE.md
+docs/
+assets_v2/
+
+# ── Sản phẩm dựng lại được ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+target/
+*.class
+
+# ── Tệp tạm của hệ điều hành ──────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+*.bak
+*.orig
+tmp_*
