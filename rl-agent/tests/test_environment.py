@@ -187,6 +187,74 @@ class TestStep:
             assert info["step"] == i + 1
 
 
+# ── W3.1 — unplaceable tasks are surfaced, not silent ─────────────────────
+
+class TestDroppedTasks:
+    """The counter must reach Python, or a run that never scheduled part of its
+    workload reports a *better* energy figure than one that scheduled all of it —
+    and nothing in the output says why (PLAN §3.9, risk R10)."""
+
+    def test_no_drops_reported_when_everything_places(self, env):
+        env.reset()
+        for _ in range(NUM_TASKS):
+            _, _, done, _, info = env.step(0)
+            assert info["dropped"] is False
+            assert info["dropped_tasks"] == 0
+            if done:
+                break
+        assert info["episode"]["dropped_tasks"] == 0
+
+    def _env_with_drops(self, drop_at):
+        gw = MockGateway(MockEntryPoint(drop_at=drop_at))
+        with patch.object(environment, "_connect_gateway", return_value=gw):
+            return environment.CloudSimEnv(scenario="HIGH", seed=42)
+
+    def test_drop_flag_marks_only_the_step_that_dropped(self):
+        e = self._env_with_drops({2})
+        try:
+            e.reset()
+            flags = []
+            for _ in range(NUM_TASKS):
+                _, _, done, _, info = e.step(0)
+                flags.append(info["dropped"])
+                if done:
+                    break
+            # Java reports the count cumulatively; the per-step event is the
+            # delta, so exactly one step may claim the drop.
+            assert flags == [False, True, False, False, False]
+        finally:
+            e.close()
+
+    def test_cumulative_count_reaches_the_episode_summary(self):
+        e = self._env_with_drops({1, 3})
+        try:
+            e.reset()
+            for _ in range(NUM_TASKS):
+                _, _, done, _, info = e.step(0)
+                if done:
+                    break
+            assert info["dropped_tasks"] == 2
+            assert info["episode"]["dropped_tasks"] == 2
+            assert info["episode"]["dropped_tasks_local"] == 2
+        finally:
+            e.close()
+
+    def test_counter_resets_between_episodes(self):
+        e = self._env_with_drops({1})
+        try:
+            for _ in range(2):
+                e.reset()
+                seen = []
+                for _ in range(NUM_TASKS):
+                    _, _, done, _, info = e.step(0)
+                    seen.append(info["dropped_tasks"])
+                    if done:
+                        break
+                assert seen[0] == 1 and seen[-1] == 1
+        finally:
+            e.close()
+
+
 # ── Action masking ────────────────────────────────────────────────────────
 
 class TestActionMasking:

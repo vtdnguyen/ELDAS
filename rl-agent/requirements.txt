@@ -21,6 +21,19 @@ matplotlib==3.10.0
 # pymoo is Pareto-compliant and provides the static baseline solver.
 pymoo==0.6.1.3
 
+# W5.1/W5.2 — moocore: reference C implementation of the Pareto indicators from the
+# group that introduced IGD+ and the EAF. Two roles:
+#   (1) a THIRD independent backend for HV/IGD+ — three agreeing implementations make a
+#       shared misreading of a definition implausible, which two do not;
+#   (2) the exact Empirical Attainment Function, used to cross-check the hand-written
+#       bootstrap comparison in eval/hv_bootstrap.py (W5.2).
+moocore==0.3.2
+
+# W5.3 — MOEA/D + SPEA2 + SMS-EMOA for the multi-algorithm static reference front.
+# Three solver families unrelated to NSGA-II, so a region of the true front has to defeat
+# all four before IGD+ silently flatters every method there.
+pymultiobjective==1.5.7
+
 # Utilities — để pip tự resolve version tương thích
 # KHÔNG pin gymnasium thủ công — SB3 và mo-gymnasium tự kéo đúng version
 shimmy==2.0.0

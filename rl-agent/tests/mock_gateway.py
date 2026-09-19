@@ -44,6 +44,7 @@ class MockStepResult:
         task_index: int,
         task_name: str,
         cost: float = 0.0,
+        dropped_tasks: int = 0,
     ) -> None:
         self._obs = obs
         self._rew = rew
@@ -51,6 +52,7 @@ class MockStepResult:
         self._task_index = task_index
         self._task_name = task_name
         self._cost = cost
+        self._dropped_tasks = dropped_tasks
 
     def observation(self) -> list[float]:
         return self._obs
@@ -71,11 +73,16 @@ class MockStepResult:
     def taskName(self) -> str:
         return self._task_name
 
+    def droppedTasks(self) -> int:
+        """W3.1 — episode-cumulative count of tasks no host could accept."""
+        return self._dropped_tasks
+
 
 class MockEntryPoint:
     """Mimics GatewayEntryPoint exposed via Py4J."""
 
-    def __init__(self, num_hosts: int = NUM_HOSTS, num_tasks: int = NUM_TASKS):
+    def __init__(self, num_hosts: int = NUM_HOSTS, num_tasks: int = NUM_TASKS,
+                 drop_at: set[int] | None = None):
         self._num_hosts = num_hosts
         self._num_tasks = num_tasks
         self._task_idx = 0
@@ -84,6 +91,11 @@ class MockEntryPoint:
         self._total_energy_kwh = 0.0
         self._sla_cost = 0.0
         self._rr_pointer = 0   # roundrobin is stateful, as in Java
+        # W3.1 — 1-based task indices this mock reports as unplaceable. Empty by
+        # default so existing tests see the unchanged trajectory; a test that
+        # wants the drop path sets it explicitly.
+        self._drop_at = drop_at or set()
+        self._dropped_tasks = 0
 
     def _make_obs(self) -> list[float]:
         """Build a 6H+4 observation mirroring Java's buildObservation()."""
@@ -119,6 +131,7 @@ class MockEntryPoint:
         self._total_energy_kwh = 0.0
         self._sla_cost = 0.0
         self._rr_pointer = 0   # fresh pointer per episode, as Java re-creates it
+        self._dropped_tasks = 0
         return MockStepResult(
             obs=self._make_obs(),
             rew=[0.0, 0.0],
@@ -137,6 +150,8 @@ class MockEntryPoint:
 
         self._task_idx += 1
         self._done = self._task_idx >= self._num_tasks
+        if self._task_idx in self._drop_at:
+            self._dropped_tasks += 1
 
         return MockStepResult(
             obs=self._make_obs(),
@@ -145,6 +160,7 @@ class MockEntryPoint:
             task_index=self._task_idx,
             task_name="" if self._done else f"task-{self._task_idx}",
             cost=step_cost,
+            dropped_tasks=self._dropped_tasks,
         )
 
     def getActionMask(self) -> list[bool]:
@@ -169,6 +185,10 @@ class MockEntryPoint:
     def getSlaCost(self) -> float:
         """G1.1 — episode-cumulative CMDP constraint cost C_SLA ≥ 0."""
         return self._sla_cost
+
+    def getDroppedTasks(self) -> int:
+        """W3.1 — tasks this episode that no host could accept."""
+        return self._dropped_tasks
 
     def getTaskCount(self) -> int:
         return self._num_tasks

@@ -221,7 +221,7 @@ def evaluate(model_path: Path, scenario: str, seed: int,
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--scenario", default="HIGH", choices=["LOW", "HIGH", "BURST"])
+    p.add_argument("--scenario", default="HIGH", help="LOW|HIGH|BURST slice the configured trace; with TRACE_PATTERN set, any generated scenario (incl. OVERLOAD, REPLAY) selects its own file")
     p.add_argument("--seed", type=int,
                    default=int(os.environ.get("RANDOM_SEED", "42")))
     p.add_argument("--total-timesteps", type=int, default=100_000,

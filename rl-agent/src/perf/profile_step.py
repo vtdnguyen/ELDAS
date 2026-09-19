@@ -221,7 +221,7 @@ def print_report(r: dict) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--scenario", default="LOW", choices=["LOW", "HIGH", "BURST"])
+    ap.add_argument("--scenario", default="LOW", help="LOW|HIGH|BURST slice the configured trace; with TRACE_PATTERN set, any generated scenario (incl. OVERLOAD, REPLAY) selects its own file")
     ap.add_argument("--seed", type=int, default=int(os.environ.get("RANDOM_SEED", "42")))
     ap.add_argument("--steps", type=int, default=300, help="timed env steps per transport")
     ap.add_argument("--rtt-samples", type=int, default=200)

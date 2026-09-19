@@ -42,8 +42,15 @@ PER_HOST_DIM     = 6   # cpu_util, mem_util, gpu_util, state_onehot[3]
 # SYS.2 — wire-format version of the packed step blob. Must match
 # StepCodec.VERSION on the Java side; a mismatch means the jar and the Python
 # source drifted apart, which would silently misread every field.
-PACKED_VERSION = 1
-_PACKED_HEADER = struct.Struct(">bbiii")   # version, done, taskIndex, H, obsLen
+#
+# v2 (W3.1) added droppedTasks to the header, moving the observation from byte 14
+# to byte 18. Reading a v2 blob with the v1 header would take that int32 as the
+# top half of observation[0] and shift every value after it — a corrupt state
+# vector that still decodes without error, which is exactly what the version
+# check exists to stop (CLAUDE.md Lưu ý #17).
+PACKED_VERSION = 2
+# version, done, taskIndex, H, obsLen, droppedTasks
+_PACKED_HEADER = struct.Struct(">bbiiii")
 
 # Slice helpers for the host blocks: feature i ∈ {0..5} starts at i*H.
 # Layout is feature-major (all H CPU utils, then all H mem utils, …).
@@ -116,6 +123,10 @@ class PackedStep:
     # (H,) bool on the packed transport; None on the legacy per-element
     # transport, which fetches the mask through a separate getActionMask() call.
     action_mask: np.ndarray | None
+    # W3.1 — episode-cumulative count of tasks no host could accept. Cumulative
+    # rather than a per-step flag so the final step carries the episode total
+    # without a further round trip; the per-step event is the delta.
+    dropped_tasks: int = 0
 
 
 def decode_packed(blob, num_hosts: int) -> PackedStep:
@@ -144,7 +155,7 @@ def decode_packed(blob, num_hosts: int) -> PackedStep:
             f"header alone needs {_PACKED_HEADER.size}"
         )
 
-    version, done, task_index, h, obs_len = _PACKED_HEADER.unpack_from(buf, 0)
+    version, done, task_index, h, obs_len, dropped = _PACKED_HEADER.unpack_from(buf, 0)
     if version != PACKED_VERSION:
         raise ValueError(
             f"Packed step wire-format mismatch: blob says v{version}, this "
@@ -196,6 +207,7 @@ def decode_packed(blob, num_hosts: int) -> PackedStep:
         task_index=int(task_index),
         task_name=task_name,
         action_mask=mask,
+        dropped_tasks=int(dropped),
     )
 
 

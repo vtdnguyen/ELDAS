@@ -185,7 +185,7 @@ def main() -> int:
         f"data/results/phase1-comparison/summary-{args.scenario}.json"
     )
     out_pdf = args.out_pdf or Path(
-        f"assets/report/figures/phase1-comparison-{args.scenario}.pdf"
+        f"docs/archive/phase1-dacn/report/figures/phase1-comparison-{args.scenario}.pdf"
     )
 
     out_json.parent.mkdir(parents=True, exist_ok=True)

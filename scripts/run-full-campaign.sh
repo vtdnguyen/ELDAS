@@ -48,7 +48,10 @@ if [[ "$MODE" == "pilot" ]]; then
   DEF_EPISODES=40; DEF_PPO=40; DEF_PAR=2
 elif [[ "$MODE" == "full" ]]; then
   DEF_SCENARIOS="LOW HIGH BURST"; DEF_SEEDS="42,43,44,45,46"
-  DEF_BUDGETS="0.02,0.04,0.06,0.08,0.10"; DEF_EPISODES=200; DEF_PPO=200; DEF_PAR=4
+  # KHONG co budget mac dinh cho 'full': luoi 0.02-0.10 cu co truoc san deadline
+  # (W1.5) va truoc phi drop (W3), ca hai doi THANG cua C_SLA. Phai do san kha thi
+  # bang pilot (W6.1) roi truyen luoi tuong minh.
+  DEF_BUDGETS=""; DEF_EPISODES=200; DEF_PPO=200; DEF_PAR=4
 else
   echo "MODE phai la 'pilot' hoac 'full'. Nhan: '$MODE'" >&2; exit 2
 fi
@@ -57,24 +60,100 @@ fi
 SCENARIOS="${SCENARIOS_ARG:-${SCENARIOS:-$DEF_SCENARIOS}}"
 SCENARIOS="${SCENARIOS//,/ }"    # "LOW,BURST" -> "LOW BURST"
 BUDGETS="${BUDGETS_ARG:-${BUDGETS:-$DEF_BUDGETS}}"
+if [[ -z "$BUDGETS" ]]; then
+  echo "Thieu BUDGETS." >&2
+  echo "  Luoi cu 0.02..0.10 da VO NGHIA: san deadline tuyet doi (W1.5) va phi cho" >&2
+  echo "  task bi drop (W3) deu doi THANG cua C_SLA, nen luoi do gio nam o cho tuy y" >&2
+  echo "  tren truc moi - rat co the nam tron trong vung slack, noi moi budget hoi tu" >&2
+  echo "  ve CUNG mot policy va 'Pareto front' la mot diem ve nam lan." >&2
+  echo "  Chay pilot (W6.1) de do san SLA kha thi, roi:" >&2
+  echo "    bash scripts/run-full-campaign.sh full HIGH 0.02,0.03,0.04,0.05,0.06" >&2
+  exit 2
+fi
 
 SEEDS="${SEEDS:-$DEF_SEEDS}"
 EPISODES="${EPISODES:-$DEF_EPISODES}"
 PPO_EPISODES="${PPO_EPISODES:-$DEF_PPO}"
 PARALLEL="${PARALLEL:-$DEF_PAR}"
+# Gain cua vong doi ngau. Mac dinh giu nguyen duong cu; override khi can.
+K_P="${K_P:-0.05}"
+K_I="${K_I:-0.05}"
+
+# ── WM-1 arm (W1-W5). ARM khong dat = duong LEGACY nhu truoc, khong doi gi. ──
+#   ARM=homo|hetero  =>  doc trace sinh san o data/wm1/<ARM>/<SC>/seed<NN>.csv
+#                        va ghi ket qua vao /data/results/wm1/<ARM>/  (PLAN §4.1)
+#   Arm nam TRONG duong ghi ket qua => homo/hetero khong the ghi de nhau (risk R6,
+#   loi C16 da tung xay ra). Guard trong eval/paths.py chan luon truong hop tro vao
+#   /data/results (LEGACY) khi TRACE_PATTERN dang bat (risk R5).
+ARM="${ARM:-}"
+if [[ -n "$ARM" ]]; then
+  case "$ARM" in
+    homo|hetero) ;;
+    *) echo "ARM phai la 'homo' hoac 'hetero'. Nhan: '$ARM'" >&2; exit 2 ;;
+  esac
+  MANIFEST="$PWD/data/wm1/$ARM/wm1-manifest.json"
+  [[ -r "$MANIFEST" ]] || { echo "Thieu $MANIFEST - chay 'bash scripts/gen-workloads.sh' truoc" >&2; exit 2; }
+  export TRACE_PATTERN="/data/wm1/${ARM}/{scenario}/seed{seed}.csv"
+  # RESULTS_ROOT lets a re-run land somewhere new instead of on top of the old one.
+  # It is not cosmetic: points.jsonl is APPENDED to and run_campaign.py aggregates
+  # whatever it finds there, so re-running into a directory that still holds policies
+  # trained on the OLD reward (§19) silently averages the two together and the table
+  # looks entirely normal. New reward => new root.
+  RESULTS="${RESULTS_ROOT:-/data/results/wm1}/${ARM}"
+  # The arm decides the topology BOTH ways. Only setting it for hetero leaves an
+  # inherited TOPOLOGY_CONFIG in place when a caller runs hetero and then homo in
+  # the same shell (exactly what the W6 driver does), so the homo campaign would
+  # run on the hetero cluster and write its results under .../homo/ - wrong numbers
+  # filed under the right name, which is the hardest kind to notice later.
+  if [[ "$ARM" == "hetero" ]]; then
+    export TOPOLOGY_CONFIG="${TOPOLOGY_CONFIG:-/config/topology-hetero.json}"
+  else
+    export TOPOLOGY_CONFIG=""
+  fi
+  VALID_SC="LOW|HIGH|BURST|OVERLOAD|REPLAY"
+else
+  RESULTS="/data/results"
+  VALID_SC="LOW|HIGH|BURST"
+fi
 
 # Fail-fast: chan scenario go sai (khong de job chay hang gio roi moi loi).
 for SC in $SCENARIOS; do
-  case "$SC" in
-    LOW|HIGH|BURST) ;;
-    *) echo "Scenario khong hop le: '$SC'. Chi LOW | HIGH | BURST" >&2; exit 2 ;;
-  esac
+  if [[ ! "$SC" =~ ^($VALID_SC)$ ]]; then
+    echo "Scenario khong hop le: '$SC'. Cho phep: ${VALID_SC//|/ | }" >&2; exit 2
+  fi
 done
 
-# Episode length mỗi scenario (đã ĐO trên trace thật) → đổi #episode ra #timestep
-# để số dual-update (≈ episode) ĐỒNG NHẤT giữa các scenario (điều kiện so sánh công bằng).
-tasks_of() { case "$1" in
-  LOW) echo 1813 ;; HIGH) echo 7255 ;; BURST) echo 3569 ;; *) echo 1813 ;; esac; }
+# Episode length moi scenario -> doi #episode ra #timestep de so dual-update
+# (~ so episode) DONG NHAT giua cac scenario (dieu kien so sanh cong bang).
+#
+# Voi WM-1: DOC TU MANIFEST, khong hardcode. So task da doi HAI lan (W1.2 roi W3.1
+# loc job khong host don nao chay noi); mot bang hardcode se lang le cho sai ngan
+# sach timestep, va sai o day khong crash - no chi lam moi run ngan/dai hon y muon.
+tasks_of() {
+  local sc="$1" n=""
+  if [[ -n "$ARM" ]]; then
+    # Doc TRONG CONTAINER, khong dung python cua host. Script nay export
+    # MSYS_NO_PATHCONV=1 (bat buoc cho tham so docker), nen Git Bash KHONG con
+    # doi /d/... sang D:/... va python.exe cua Windows se khong tim thay file:
+    # da gap that - tasks_of tra ve rong => TS=0 => moi run "thanh cong" tuc thi
+    # voi 0 timestep. Trong container duong dan la Linux that su.
+    n=$(docker compose run --rm --no-deps --entrypoint python rl-agent -c \
+      "import json;m=json.load(open('/data/wm1/${ARM}/wm1-manifest.json'));\
+print({t['scenario']:t['n_task'] for t in m['traces']}.get('${sc}',''))" 2>/dev/null \
+      | tr -d '\r' | tail -1)
+  else
+    case "$sc" in
+      LOW) n=1813 ;; HIGH) n=7255 ;; BURST) n=3569 ;; *) n=1813 ;;
+    esac
+  fi
+  # KHONG BAO GIO tra ve rong: mot TASKS rong bien thanh TS=0 va ca job chay het
+  # trong vai giay, sinh ra file ket qua trong nhin nhu that.
+  if [[ ! "$n" =~ ^[0-9]+$ ]] || [[ "$n" -le 0 ]]; then
+    echo "Khong doc duoc so task cho scenario '$sc' (arm='${ARM:-legacy}'): '$n'" >&2
+    return 1
+  fi
+  echo "$n"
+}
 
 PY4J_PORT="${PY4J_PORT:-25333}"
 PORT_MAX=$(( PY4J_PORT + PARALLEL - 1 ))
@@ -85,7 +164,8 @@ Ro() { docker compose run --rm --no-deps "$@"; }       # offline (không cần g
 hr() { printf '\n\033[1m── %s ──\033[0m\n' "$*"; }
 
 t0=$(date +%s)
-hr "SETUP  (MODE=$MODE · scenarios=[$SCENARIOS] · seeds=$SEEDS · budgets=$BUDGETS · episodes=$EPISODES · parallel=$PARALLEL)"
+hr "SETUP  (MODE=$MODE · arm=${ARM:-legacy} · scenarios=[$SCENARIOS] · seeds=$SEEDS · budgets=$BUDGETS · episodes=$EPISODES · parallel=$PARALLEL)"
+echo "results -> $RESULTS${TRACE_PATTERN:+   trace -> $TRACE_PATTERN}"
 
 # 0) Build — MẶC ĐỊNH TỰ BỎ QUA nếu cả 2 image đã tồn tại (tránh vô tình tải lại
 #    ~1GB ML stack). Chỉ build khi image THIẾU, hoặc khi ép FORCE_BUILD=1 (dùng
@@ -101,8 +181,21 @@ elif [[ "${FORCE_BUILD:-0}" == "1" ]]; then
   echo "FORCE_BUILD=1 → build lại image..."
   docker compose build cloudsim-java rl-agent || { echo "build failed"; exit 1; }
 elif [[ "$have_imgs" == "1" ]]; then
-  echo "Image eldas-cloudsim-java + eldas-rl-agent đã có ⇒ bỏ qua build."
-  echo "  (đổi code rồi? chạy lại với  FORCE_BUILD=1  để build mới.)"
+  # R13: rl-agent COPY src luc build va KHONG mount ./rl-agent/src, nen "image da co"
+  # KHONG dong nghia "image co code hien tai". Bo qua build sau khi sua .py = ca job qua
+  # dem chay code CU, im lang, ra ket qua trong nhu that. So mtime source vs image.
+  IMG_TS=$(docker image inspect -f '{{.Created}}' eldas-rl-agent 2>/dev/null)
+  IMG_EPOCH=$(docker image inspect -f '{{.Created}}' eldas-rl-agent 2>/dev/null \
+    | python3 -c "import sys,datetime;print(int(datetime.datetime.fromisoformat(sys.stdin.read().strip().replace('Z','+00:00')).timestamp()))" 2>/dev/null || echo 0)
+  NEWER=$(find rl-agent/src rl-agent/requirements.txt cloudsim-java/src -type f \
+            -newermt "@${IMG_EPOCH}" 2>/dev/null | head -1)
+  if [[ -n "$NEWER" ]]; then
+    echo "Source MOI HON image ($IMG_TS) — vd: $NEWER"
+    echo "  => build lai, neu khong ca job se chay code cu (R13)."
+    docker compose build cloudsim-java rl-agent || { echo "build failed"; exit 1; }
+  else
+    echo "Image da co va khong cu hon source ⇒ bỏ qua build."
+  fi
 else
   echo "Chưa có image ⇒ build lần đầu (có thể lâu tùy mạng)..."
   docker compose build cloudsim-java rl-agent || { echo "build failed"; exit 1; }
@@ -118,20 +211,37 @@ echo "gateways đang chạy: $GW (cần $PARALLEL)"
 # 2) Sanity nhanh: Java validation (fail fast trước khi tốn hàng giờ).
 #    Dùng direct bind mount (không phải named volume eldas_trace-data — đã bỏ).
 hr "Java ValidationRunner (sanity)"
-docker run --rm -v "$PWD/data/alibaba-trace:/data/trace:ro" --entrypoint java \
-  eldas-cloudsim-java -cp simulation.jar sim.ValidationRunner 2>&1 | grep -E "^PASS =|^FAIL ="
+VR_OUT=$(docker run --rm -v "$PWD/data/alibaba-trace:/data/trace:ro" \
+  -v "$PWD/data/wm1:/data/wm1:ro" -v "$PWD/config:/config:ro" --entrypoint java \
+  eldas-cloudsim-java -cp simulation.jar sim.ValidationRunner 2>&1)
+echo "$VR_OUT" | grep -E "^PASS =|^FAIL =|^SKIP ="
+# FAIL o day = dung han. Mot job qua dem tren code da hong chi sinh ra so lieu sai,
+# va sai kieu "chay het, co file, so nhin hop ly" moi la kieu ton kem nhat.
+JFAIL=$(echo "$VR_OUT" | sed -n "s/^FAIL = \([0-9]*\).*/\1/p")
+if [[ "${JFAIL:-1}" != "0" ]]; then
+  echo "Java validation FAIL=${JFAIL:-?} - DUNG truoc khi ton hang gio." >&2
+  echo "$VR_OUT" | grep -E "^\[FAIL\]" >&2
+  exit 1
+fi
 
 # ── Vòng theo scenario ──────────────────────────────────────────────────────
 for SC in $SCENARIOS; do
-  TASKS=$(tasks_of "$SC")
+  TASKS=$(tasks_of "$SC") || exit 1
   TS=$(( EPISODES * TASKS ))
   PPO_TS=$(( PPO_EPISODES * TASKS ))
+  # Luu y #23: thang cua tin hieu rang buoc phai DONG BANG. Neu khong, J = mean(c)/std(c)
+  # do HINH DANG phan bo chi phi chu khong do MUC, nen ngan sach d khong lai duoc gi:
+  # do duoc o W6.3 la ca hai dot campaign deu cho 5 budget -> 5 diem gan trung, va lambda
+  # chi cong don mot sai lech khong doi. Dong bang sau 5 episode: du de uoc luong on dinh
+  # ma chua kip bi policy lam lech.
+  COST_FREEZE="${COST_FREEZE:-$(( 5 * TASKS ))}"
   hr "SCENARIO $SC  (timesteps/run = $EPISODES ep × $TASKS task = $TS)"
 
   # 1) NSGA-II reference front (offline, không cần gateway)
   echo "[1/4] NSGA-II reference front..."
   Ro --entrypoint python rl-agent \
     src/eval/nsga2_baseline.py --scenario "$SC" --max-tasks 80 --pop-size 80 --n-gen 60 \
+    --output "$RESULTS" \
     || echo "  [warn] NSGA-II loi, bo qua - campaign van chay khong co no"
 
   # 2) fixed-weight PPO (ppo-min, seed 42) — baseline Phase-1
@@ -139,24 +249,42 @@ for SC in $SCENARIOS; do
   R --entrypoint python rl-agent \
     src/train_min.py --scenario "$SC" --seed 42 --total-timesteps "$PPO_TS" \
     --model-out "/data/models/ppo-min-${SC}.zip" \
-    --eval-out "/data/results/baseline-${SC}/ppo-min" \
+    --eval-out "${RESULTS}/baseline-${SC}/ppo-min" \
     || echo "  ⚠ ppo-min lỗi (bỏ qua)"
+
+  # 2b) fixed-weight PPO FRONT (ppo-w*) — chi chay khi PPO_FIXED_WEIGHTS duoc dat.
+  #     Day la doi thu that su cua CMDP-PID trong RQ4: "chinh tay trong so" vs "chinh
+  #     ngan sach co nguyen tac". Mot diem ppo-min don le KHONG tao thanh front, nen
+  #     ho "ppo-fixed" ma hv_bootstrap/eaf_compare so sanh se RONG neu bo qua buoc nay
+  #     - va ca hai cong cu chi im lang bo qua cap so sanh do.
+  if [[ -n "${PPO_FIXED_WEIGHTS:-}" ]]; then
+    echo "[2b/4] ppo-fixed front: weights=[$PPO_FIXED_WEIGHTS] × seeds=[$SEEDS]..."
+    R --entrypoint python rl-agent \
+      src/eval/ppo_fixed_sweep.py --scenario "$SC" \
+      --weights "$PPO_FIXED_WEIGHTS" --seeds "$SEEDS" \
+      --total-timesteps "$TS" --parallel "$PARALLEL" \
+      --output "$RESULTS" --skip-existing \
+      || echo "  [warn] ppo-fixed sweep loi - campaign van chay, nhung cap cmdp-pid vs ppo-fixed se trong"
+  fi
 
   # 3) CMDP-PID budget sweep — song song theo RUN (đòn bẩy C9)
   echo "[3/4] CMDP sweep: budgets=[$BUDGETS] × seeds=[$SEEDS], --parallel $PARALLEL..."
   R --entrypoint python rl-agent \
     src/eval/sweep_budget.py --scenario "$SC" \
     --budgets "$BUDGETS" --seeds "$SEEDS" \
-    --total-timesteps "$TS" --k-p 0.05 --k-i 0.05 --parallel "$PARALLEL" \
+    --total-timesteps "$TS" --k-p "$K_P" --k-i "$K_I" \
+    --cost-freeze-after "$COST_FREEZE" --parallel "$PARALLEL" \
+    --output "$RESULTS" \
     || echo "  [warn] sweep loi/non-monotone - xem verdict o tren, co the can train lau hon. C1"
 
   # 4) Campaign: heuristics + gộp sweep + ppo-min + NSGA-II → bảng + figure
   echo "[4/4] campaign aggregate..."
   R --entrypoint python rl-agent \
     src/eval/run_campaign.py --scenario "$SC" --seeds "$SEEDS" --run-baselines \
+    --results "$RESULTS" \
     || echo "  ⚠ campaign lỗi"
 
-  echo "→ $SC xong: /data/results/campaign-${SC}/{table.md, pareto-${SC}.png, campaign_summary.json}"
+  echo "→ $SC xong: ${RESULTS}/campaign-${SC}/{table.md, pareto-${SC}.png, campaign_summary.json}"
 done
 
 # ── Kết thúc ────────────────────────────────────────────────────────────────
@@ -164,7 +292,7 @@ docker compose up -d --force-recreate cloudsim-java >/dev/null 2>&1   # tra ve 1
 t_end=$(date +%s)
 mins=$(( (t_end - t0) / 60 ))
 hr "HOAN TAT sau ~${mins} phut"
-echo "Output: data/results/campaign-<SC>/table.md + pareto-<SC>.png cho: $SCENARIOS"
+echo "Output: ${RESULTS}/campaign-<SC>/table.md + pareto-<SC>.png cho: $SCENARIOS"
 echo
 echo "GHI CHU (day la nhac chung, KHONG phai ket qua):"
 echo " - Verdict MONOTONE/NON-MONOTONE THAT cua tung scenario nam o khoi 'G2.5 sweep'"

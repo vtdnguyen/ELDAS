@@ -163,6 +163,7 @@ class CloudSimEnv(gym.Env):
         self._step_count = 0
         self._episode_rewards: list[np.ndarray] = []
         self._episode_cost = 0.0  # G1.1 — running Σ C_SLA for this episode
+        self._dropped_tasks = 0   # W3.1 — running count of unplaceable tasks
         self._needs_initial_reset = True
 
     # ── Transport (SYS.2) ──────────────────────────────────────────────
@@ -211,6 +212,7 @@ class CloudSimEnv(gym.Env):
             task_index=int(raw.taskIndex()),
             task_name=str(raw.taskName()),
             action_mask=None,
+            dropped_tasks=int(raw.droppedTasks()),
         )
 
     # ── Gymnasium API ──────────────────────────────────────────────────
@@ -252,6 +254,7 @@ class CloudSimEnv(gym.Env):
         self._step_count = 0
         self._episode_rewards = []
         self._episode_cost = 0.0
+        self._dropped_tasks = decoded.dropped_tasks   # 0 on a fresh episode
 
         if self._reward_normalizer is not None:
             self._reward_normalizer = reward_mod.RewardNormalizer()
@@ -302,6 +305,12 @@ class CloudSimEnv(gym.Env):
         raw_cost = decoded.cost
         self._episode_cost += raw_cost
 
+        # W3.1 — Java reports the count cumulatively; the per-step event is the
+        # delta. A dropped task is already charged into raw_cost (κ·(T−creation)),
+        # so this flag is diagnostic, not a second penalty.
+        dropped_now = decoded.dropped_tasks > self._dropped_tasks
+        self._dropped_tasks = decoded.dropped_tasks
+
         if self._reward_normalizer is not None:
             reward_vec = self._reward_normalizer.update_and_normalize(raw_reward)
         else:
@@ -320,6 +329,9 @@ class CloudSimEnv(gym.Env):
             # CMDP fields (G1.1): R_energy objective + C_SLA constraint cost.
             "reward_energy": float(raw_reward[0]),
             "cost": raw_cost,
+            # W3.1 (§3.9): did THIS task fail to place, and how many have so far.
+            "dropped": dropped_now,
+            "dropped_tasks": self._dropped_tasks,
         }
 
         if terminated:
@@ -367,6 +379,12 @@ class CloudSimEnv(gym.Env):
             # Java as the authoritative value; equals the locally summed cost.
             "total_sla_cost": float(self._ep.getSlaCost()),
             "total_sla_cost_local": self._episode_cost,
+            # W3.1 — must be 0 on every calibrated scenario except OVERLOAD. A
+            # non-zero value means part of the workload never ran, so the energy
+            # figure covers fewer tasks than the trace holds and is not
+            # comparable with a run that placed them all (risk R10).
+            "dropped_tasks": int(self._ep.getDroppedTasks()),
+            "dropped_tasks_local": self._dropped_tasks,
         }
 
     # ── Metrics export ────────────────────────────────────────────────

@@ -22,10 +22,18 @@ services:
       # nằm trên host, không có gì để "mất".  :ro = Java chỉ đọc.
       - ./data/alibaba-trace:/data/trace:ro
       - ./data/results:/data/results
+      # W2.2 — generated WM-1 workloads, one file per (arm, scenario, seed).
+      # Selected at reset() time via TRACE_PATTERN; unset ⇒ the trace above is
+      # used and behaviour is exactly Phase-1. Read-only: only gen-workloads.sh
+      # writes here.
+      - ./data/wm1:/data/wm1:ro
       # G2.1 — mount topology configs read-only so TOPOLOGY_CONFIG can point at
       # /config/topology-hetero.json for the heterogeneous CPU-GPU cluster.
       - ./config:/config:ro
     environment:
+      # W2.1/W2.2 — trace selection. Both unset ⇒ Phase-1 behaviour.
+      - TRACE_FILE=${TRACE_FILE:-}
+      - TRACE_PATTERN=${TRACE_PATTERN:-}
       - PY4J_PORT=${PY4J_PORT}
       # SYS.1 — number of INDEPENDENT gateways this JVM serves, on ports
       # PY4J_PORT … PY4J_PORT+NUM_GATEWAYS-1. One per SubprocVecEnv worker.
@@ -85,6 +93,9 @@ services:
       # G2.3 — NSGA-II static baseline reads the trace CSV + topology JSON
       # directly (offline, no gateway). Read-only mounts.
       - ./data/alibaba-trace:/data/trace:ro
+      # W2.2 — same generated workloads the gateway reads; the offline evaluators
+      # (NSGA-II reference front, characterisation) need them too.
+      - ./data/wm1:/data/wm1
       - ./config:/config:ro
     environment:
       # Python dùng tên service "cloudsim-java" để tìm IP — Docker DNS tự resolve
@@ -92,6 +103,16 @@ services:
       - GATEWAY_PORT=${PY4J_PORT}
       # G2.1/G2.3 — topology JSON path shared with the Java side (opt-in).
       - TOPOLOGY_CONFIG=${TOPOLOGY_CONFIG:-}
+      # W2.4 — the SAME trace selection the Java side gets. Without this passthrough the
+      # variable is simply absent in this container, and every OFFLINE evaluator
+      # (NSGA-II / multi-solver reference front, characterisation) silently falls back to
+      # the LEGACY trace while the DES runs WM-1. The reference front would then describe
+      # a different workload than the measured points, and every IGD+ against it would be
+      # meaningless — the exact failure trace_loader.resolve_trace_path was written to
+      # prevent. It was: the code was correct, the variable never arrived.
+      # It also lets eval/paths.py see WM-1 mode and refuse to overwrite LEGACY results.
+      - TRACE_FILE=${TRACE_FILE:-}
+      - TRACE_PATTERN=${TRACE_PATTERN:-}
       - ENERGY_WEIGHT=${ENERGY_WEIGHT}
       - SLA_WEIGHT=${SLA_WEIGHT}
       - WANDB_API_KEY=${WANDB_API_KEY}

@@ -51,6 +51,7 @@ def _rollout(env: CloudSimEnv, actions: list[int]) -> dict:
         "done": [],
         "task_index": [],
         "task_name": [],
+        "dropped_tasks": [],
     }
     for a in actions:
         obs, reward, terminated, truncated, info = env.step(a)
@@ -61,10 +62,15 @@ def _rollout(env: CloudSimEnv, actions: list[int]) -> dict:
         trace["done"].append(bool(terminated))
         trace["task_index"].append(int(info["task_index"]))
         trace["task_name"].append(str(info["task_name"]))
+        # W3.1 — droppedTasks entered the header in wire v2. Compared per step so
+        # a codec that mis-parsed the new field is caught here, not by a campaign
+        # whose SLA cost is quietly wrong.
+        trace["dropped_tasks"].append(int(info["dropped_tasks"]))
         if terminated or truncated:
             break
     trace["energy_kwh"] = float(env._ep.getTotalEnergyKwh())
     trace["sla_cost"] = float(env._ep.getSlaCost())
+    trace["dropped_total"] = int(env._ep.getDroppedTasks())
     return trace
 
 
@@ -108,11 +114,11 @@ def compare(ref: dict, packed: dict) -> list[str]:
     for i, (a, b) in enumerate(zip(ref["reward"], packed["reward"])):
         if not np.array_equal(a, b):
             problems.append(f"reward[{i}] differs: {a} vs {b}")
-    for key in ("cost", "done", "task_index", "task_name"):
+    for key in ("cost", "done", "task_index", "task_name", "dropped_tasks"):
         for i, (a, b) in enumerate(zip(ref[key], packed[key])):
             if a != b:
                 problems.append(f"{key}[{i}] differs: {a!r} vs {b!r}")
-    for key in ("energy_kwh", "sla_cost"):
+    for key in ("energy_kwh", "sla_cost", "dropped_total"):
         if ref[key] != packed[key]:
             problems.append(
                 f"episode {key} differs: {ref[key]!r} vs {packed[key]!r} "
@@ -124,7 +130,9 @@ def compare(ref: dict, packed: dict) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--scenario", default="LOW", choices=["LOW", "HIGH", "BURST"])
+    # Free-form: under TRACE_PATTERN the label selects a WM-1 file, so OVERLOAD —
+    # the one scenario that exercises the drop path end to end — must be sayable.
+    ap.add_argument("--scenario", default="LOW")
     ap.add_argument("--seed", type=int, default=int(os.environ.get("RANDOM_SEED", "42")))
     ap.add_argument("--steps", type=int, default=200)
     args = ap.parse_args()
@@ -160,6 +168,12 @@ def main() -> int:
     print(f"  energy kWh (packed) : {packed_trace['energy_kwh']!r}")
     print(f"  C_SLA (ref)         : {ref_trace['sla_cost']!r}")
     print(f"  C_SLA (packed)      : {packed_trace['sla_cost']!r}")
+    print(f"  dropped (ref/packed): {ref_trace['dropped_total']} / "
+          f"{packed_trace['dropped_total']}")
+    if ref_trace["dropped_total"] == 0:
+        print("  NOTE: no task was dropped, so the W3.1 droppedTasks field was")
+        print("        never exercised beyond 0. Re-run against a cluster or")
+        print("        scenario that forces drops (e.g. NUM_HOSTS=1) to cover it.")
     print("-" * 72)
     if problems:
         print(f"  VERDICT: FAIL — {len(problems)} mismatch(es):")
