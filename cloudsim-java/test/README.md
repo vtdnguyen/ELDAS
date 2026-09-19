@@ -24,7 +24,7 @@ per assertion; see the source for what each one verifies.
 ## What it asserts
 
 Behaviour after the B2/B3 fix (see
-[`assets/report/java-validation-report.md`](../../assets/report/java-validation-report.md)):
+[`docs/archive/phase1-dacn/docs/java-validation-report.md`](../../docs/archive/phase1-dacn/docs/java-validation-report.md)):
 
 | Test method | Status | Asserts |
 |---|---|---|

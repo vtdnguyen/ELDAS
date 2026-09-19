@@ -35,7 +35,8 @@ import java.nio.charset.StandardCharsets;
  *   2       int32       taskIndex
  *   6       int32       numHosts (H)
  *   10      int32       obsLen (= 6H+4)
- *   14      float64[]   observation  (obsLen values)
+ *   14      int32       droppedTasks (episode-cumulative, W3.1)
+ *   18      float64[]   observation  (obsLen values)
  *   ...     float64[2]  reward [R_energy, R_sla]
  *   ...     float64     cost (C_SLA for this step, ≥ 0)
  *   ...     uint8[H]    action mask (1 = host feasible)
@@ -48,8 +49,16 @@ import java.nio.charset.StandardCharsets;
  */
 public final class StepCodec {
 
-    /** Wire-format version. Bump on any layout change; Python asserts on it. */
-    public static final byte VERSION = 1;
+    /**
+     * Wire-format version. Bump on any layout change; Python asserts on it.
+     *
+     * <p>v2 (W3.1) inserted {@code droppedTasks} into the header, shifting the
+     * observation from offset 14 to 18. The bump is what makes that safe: a
+     * Python build expecting v1 would otherwise read the new int32 as the first
+     * four bytes of {@code observation[0]} and carry on with a plausible,
+     * entirely wrong state vector (CLAUDE.md Lưu ý #17).
+     */
+    public static final byte VERSION = 2;
 
     private StepCodec() {}
 
@@ -67,7 +76,7 @@ public final class StepCodec {
         final byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
         final int h = mask.length;
 
-        final int size = 1 + 1 + 4 + 4 + 4
+        final int size = 1 + 1 + 4 + 4 + 4 + 4
                 + 8 * obs.length
                 + 8 * 2
                 + 8
@@ -80,6 +89,7 @@ public final class StepCodec {
         buf.putInt(r.taskIndex());
         buf.putInt(h);
         buf.putInt(obs.length);
+        buf.putInt(r.droppedTasks());          // W3.1
         for (double v : obs) {
             buf.putDouble(v);
         }
