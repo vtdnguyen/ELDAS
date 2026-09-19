@@ -38,7 +38,9 @@ from environment import CloudSimEnv
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--scenario", default="LOW", choices=["LOW", "HIGH", "BURST"])
+    ap.add_argument("--scenario", default="LOW",
+                    help="LOW|HIGH|BURST slice the configured trace; with "
+                         "TRACE_PATTERN set, any generated scenario works")
     ap.add_argument("--seed", type=int, default=int(os.environ.get("RANDOM_SEED", "42")))
     ap.add_argument("--resets", type=int, default=60, help="episode resets to perform")
     ap.add_argument("--steps-per-episode", type=int, default=25,

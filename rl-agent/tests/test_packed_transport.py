@@ -40,13 +40,15 @@ def build_blob(
     cost: float = 2.5,
     mask: list[int] | None = None,
     task_name: str = "task-42",
+    dropped_tasks: int = 0,
 ) -> bytes:
     """Hand-assemble a blob byte-for-byte per the documented StepCodec layout."""
     obs = [0.5] * OBS_LEN if obs is None else obs
     mask = [1, 0, 1] if mask is None else mask
     name_bytes = task_name.encode("utf-8")
 
-    out = struct.pack(">bbiii", version, done, task_index, num_hosts, len(obs))
+    out = struct.pack(">bbiiii", version, done, task_index, num_hosts, len(obs),
+                      dropped_tasks)
     out += struct.pack(f">{len(obs)}d", *obs)
     out += struct.pack(">2d", *reward)
     out += struct.pack(">d", cost)
@@ -60,7 +62,8 @@ class TestDecodeHappyPath:
     def test_decodes_every_field(self):
         obs = [i / 100.0 for i in range(OBS_LEN)]
         blob = build_blob(obs=obs, done=1, task_index=13, reward=(-3.25, -7.5),
-                          cost=7.5, mask=[0, 1, 1], task_name="pod-xyz")
+                          cost=7.5, mask=[0, 1, 1], task_name="pod-xyz",
+                          dropped_tasks=4)
 
         pk = state_builder.decode_packed(blob, NUM_HOSTS)
 
@@ -70,6 +73,7 @@ class TestDecodeHappyPath:
         assert pk.done is True
         assert pk.task_index == 13
         assert pk.task_name == "pod-xyz"
+        assert pk.dropped_tasks == 4
         np.testing.assert_array_equal(pk.action_mask, np.array([False, True, True]))
 
     def test_observation_shape_matches_env_contract(self):
@@ -105,6 +109,20 @@ class TestDecodeHappyPath:
     def test_non_ascii_task_name_round_trips(self):
         pk = state_builder.decode_packed(build_blob(task_name="tác-vụ-λ"), NUM_HOSTS)
         assert pk.task_name == "tác-vụ-λ"
+
+    def test_dropped_tasks_defaults_to_zero(self):
+        # The common case: nothing was unplaceable, so the field must read 0
+        # rather than picking up whatever bytes follow it.
+        assert state_builder.decode_packed(build_blob(), NUM_HOSTS).dropped_tasks == 0
+
+    def test_dropped_tasks_is_big_endian_at_offset_14(self):
+        # W3.1 pushed the observation from byte 14 to 18. Pinning the offset here
+        # is the Python half of ValidationRunner B18a6: if Java ever writes the
+        # field elsewhere, the observation shifts and every value is wrong while
+        # still decoding cleanly.
+        blob = build_blob(dropped_tasks=258)          # 0x00000102
+        assert blob[14:18] == bytes([0, 0, 1, 2])
+        assert state_builder.decode_packed(blob, NUM_HOSTS).dropped_tasks == 258
 
     def test_negative_rewards_and_zero_cost(self):
         # R_energy = −ΔE ≤ 0 and C_SLA ≥ 0 are the physical signs (G1.1).
@@ -150,7 +168,7 @@ class TestBigEndianContract:
         # used native ('=f8') order it would read this as a denormal on x86.
         obs = [1.0] + [0.0] * (OBS_LEN - 1)
         blob = build_blob(obs=obs)
-        assert blob[14:22] == bytes([0x3F, 0xF0, 0, 0, 0, 0, 0, 0])
+        assert blob[18:26] == bytes([0x3F, 0xF0, 0, 0, 0, 0, 0, 0])
         pk = state_builder.decode_packed(blob, NUM_HOSTS)
         assert pk.observation[0] == 1.0
 

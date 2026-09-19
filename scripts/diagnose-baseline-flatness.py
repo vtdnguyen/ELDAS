@@ -14,7 +14,7 @@ The script reads ``data/results/baseline-{SCENARIO}-flat/{policy}/metrics.csv``
 3. Host-state distribution over time (post-fix) — how many hosts are
    ACTIVE / IDLE / SUSPENDED at each snapshot.
 
-Output: ``assets/report/figures/diagnostic-baseline-flatness.pdf``.
+Output: ``docs/archive/phase1-dacn/report/figures/diagnostic-baseline-flatness.pdf``.
 
 Usage (host)::
 
@@ -230,10 +230,10 @@ def main() -> int:
     p.add_argument("--results-root", default="data/results", type=Path)
     p.add_argument("--out", default=None, type=Path,
                    help="output PDF path "
-                        "(default: assets/report/figures/diagnostic-baseline-flatness.pdf)")
+                        "(default: docs/archive/phase1-dacn/report/figures/diagnostic-baseline-flatness.pdf)")
     args = p.parse_args()
 
-    out = args.out or Path("assets/report/figures/diagnostic-baseline-flatness.pdf")
+    out = args.out or Path("docs/archive/phase1-dacn/report/figures/diagnostic-baseline-flatness.pdf")
     return diagnose(args.scenario, args.results_root.resolve(), out.resolve())
 
 

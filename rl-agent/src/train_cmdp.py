@@ -289,14 +289,19 @@ def _action_mask_fn(env):
 
 
 def build_cmdp_env(scenario: str, seed: int, pid: PIDLagrangian,
-                   normalize: bool = True) -> Monitor:
+                   normalize: bool = True,
+                   cost_freeze_after: int | None = None) -> Monitor:
     """CloudSim → CMDPRewardWrapper → ActionMasker → Monitor.
 
     The base ``CloudSimEnv`` is built with ``normalize_reward=False``; the CMDP
     wrapper owns the *separate* normalisation of ``R_energy`` and ``C_SLA``.
+
+    ``cost_freeze_after`` fixes the constraint scale after that many steps, so
+    that J tracks the raw cost level instead of its shape. None = old behaviour.
     """
     base = CloudSimEnv(scenario=scenario, seed=seed, normalize_reward=False)
-    shaped = CMDPRewardWrapper(base, pid=pid, normalize=normalize)
+    shaped = CMDPRewardWrapper(base, pid=pid, normalize=normalize,
+                               cost_freeze_after=cost_freeze_after)
     masked = ActionMasker(shaped, action_mask_fn=_action_mask_fn)
     return Monitor(masked)
 
@@ -317,6 +322,7 @@ def train_cmdp(
     n_steps: int = 512,
     n_envs: int = 1,
     torch_threads: int = DEFAULT_TORCH_THREADS,
+    cost_freeze_after: int | None = None,
     out_path: Path,
     tracker=None,
     exporter=None,
@@ -357,7 +363,8 @@ def train_cmdp(
         print(f"[train_cmdp] SYS.1: {n_envs} parallel envs; dual_every scaled "
               f"to {dual_every} episodes to hold the two-timescale separation.")
     else:
-        env = build_cmdp_env(scenario, seed, pid)
+        env = build_cmdp_env(scenario, seed, pid,
+                             cost_freeze_after=cost_freeze_after)
 
     # Hyperparameters mirror train_min.py (Phase 1.8) so the only deliberate
     # difference vs the fixed-weight baseline is the CMDP reward + dual update.
@@ -391,6 +398,16 @@ def train_cmdp(
     print(f"[train_cmdp] model saved -> {out_path} (final λ={pid.lambda_:.6g})")
 
     summary = convergence_summary(callback.history, budget_d)
+    # W6.1 acceptance (b): value_loss must not explode. Reward normalisation is
+    # what keeps it bounded (Luu y #1) and a broken normaliser shows up here
+    # first - as ~1e10, next to an approx_kl of ~1e-9. Carrying the last logged
+    # value out of the run turns "I looked at the console" into a recorded number.
+    try:
+        logged = model.logger.name_to_value
+        summary["value_loss_final"] = float(logged.get("train/value_loss", float("nan")))
+        summary["approx_kl_final"] = float(logged.get("train/approx_kl", float("nan")))
+    except Exception:                                   # pragma: no cover
+        pass
     print_convergence_summary(summary)
 
     if trajectory_csv is not None and callback.history:
@@ -459,7 +476,8 @@ def _merge_result_json(path: Path, key: str, row: dict) -> None:
 # ── Evaluation: one greedy episode under the trained policy ─────────────────
 
 def evaluate_cmdp(model_path: Path, scenario: str, seed: int, budget_d: float,
-                  pid: PIDLagrangian, output_dir: Path) -> dict:
+                  pid: PIDLagrangian, output_dir: Path,
+                  cost_freeze_after: int | None = None) -> dict:
     """Run one greedy episode, export metrics, merge into baseline_results.json.
 
     Reports the physical CMDP outcome: energy (kWh) and the raw episodic
@@ -467,7 +485,8 @@ def evaluate_cmdp(model_path: Path, scenario: str, seed: int, budget_d: float,
     sits alongside the heuristics and the fixed-weight PPO for G2.6.
     """
     print(f"[train_cmdp] evaluating {model_path} on {scenario}/seed={seed}")
-    env = build_cmdp_env(scenario, seed, pid)
+    env = build_cmdp_env(scenario, seed, pid,
+                         cost_freeze_after=cost_freeze_after)
     cloud_env = env.unwrapped  # Monitor/ActionMasker/CMDP → CloudSimEnv
 
     model = MaskablePPO.load(str(model_path), device="cpu")
@@ -503,6 +522,9 @@ def evaluate_cmdp(model_path: Path, scenario: str, seed: int, budget_d: float,
         "total_sla_cost": sla_cost,
         "sla_budget_d": budget_d,
         "lambda_final": float(pid.lambda_),
+        # W6.1 — see baseline_eval: without this the policy could hit its SLA
+        # budget by leaving tasks unplaced and the row would look like a win.
+        "dropped_tasks": int(cloud_env._ep.getDroppedTasks()),
     }
     _merge_result_json(parent / "baseline_results.json", key, row)
     print(f"[train_cmdp] merged eval result ({key}) -> "
@@ -519,7 +541,7 @@ def evaluate_cmdp(model_path: Path, scenario: str, seed: int, budget_d: float,
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--scenario", default="HIGH", choices=["LOW", "HIGH", "BURST"])
+    p.add_argument("--scenario", default="HIGH", help="LOW|HIGH|BURST slice the configured trace; with TRACE_PATTERN set, any generated scenario (incl. OVERLOAD, REPLAY) selects its own file")
     p.add_argument("--seed", type=int,
                    default=int(os.environ.get("RANDOM_SEED", "42")))
     p.add_argument("--total-timesteps", type=int, default=100_000)
@@ -540,6 +562,14 @@ def main() -> int:
     p.add_argument("--lambda-init", type=float, default=0.0)
     p.add_argument("--dual-every", type=int, default=1,
                    help="Episodes per dual (λ) update — the slower timescale.")
+    p.add_argument("--cost-freeze-after", type=int, default=None, metavar="N",
+                   help="Freeze the CONSTRAINT scale after N cost samples. "
+                        "Without it the cost is divided by a std estimated from "
+                        "the same stream, so J measures the shape of the cost "
+                        "distribution rather than its level and the budget d "
+                        "cannot steer the run (measured: lambda 0->3.6 cut raw "
+                        "C_SLA by 10.6%% while J rose 2.2%%). Suggested: a few "
+                        "episodes' worth of steps. Omit to keep the old path.")
     p.add_argument("--n-steps", type=int, default=512,
                    help="PPO rollout length (the faster, primal timescale).")
     p.add_argument("--torch-threads", type=int, default=DEFAULT_TORCH_THREADS,
@@ -583,6 +613,16 @@ def main() -> int:
 
     eval_out = Path(args.eval_out) if args.eval_out else Path(
         f"/data/results/baseline-{args.scenario}/cmdp-d{args.sla_budget:g}")
+    # R5: đây là CLI DUY NHẤT ghi kết quả mà trước đây không gọi chốt chặn, và mặc định
+    # của nó trỏ thẳng vào gốc LEGACY. Chạy tay một lần trên WM-1 mà quên `--eval-out`
+    # là đủ để nhét một hàng WM-1 vào `/data/results/baseline-<SC>/baseline_results.json`
+    # — đã xảy ra thật, năm hàng, và không có gì báo lỗi. `evaluate_cmdp` gộp vào
+    # `<parent>/baseline_results.json` nên chốt phải soi thư mục CHA.
+    try:
+        from eval import paths as _paths
+        _paths.guard_results_root(eval_out.parent.parent, what="train_cmdp (--eval-out)")
+    except ImportError:                                   # pragma: no cover
+        pass
     traj_csv = Path(args.trajectory_csv) if args.trajectory_csv else None
 
     pid = PIDLagrangian(k_p=args.k_p, k_i=args.k_i, k_d=args.k_d,
@@ -594,6 +634,7 @@ def main() -> int:
             k_p=args.k_p, k_i=args.k_i, k_d=args.k_d, lambda_init=args.lambda_init,
             dual_every=args.dual_every, n_steps=args.n_steps, n_envs=args.n_envs,
             torch_threads=args.torch_threads,
+            cost_freeze_after=args.cost_freeze_after,
             out_path=args.model_out, tracker=tracker, exporter=exporter,
             trajectory_csv=traj_csv,
         )
@@ -603,7 +644,7 @@ def main() -> int:
         return 2
 
     evaluate_cmdp(args.model_out, args.scenario, args.seed, args.sla_budget,
-                  pid, eval_out)
+                  pid, eval_out, cost_freeze_after=args.cost_freeze_after)
 
     if tracker is not None:
         tracker.finish()

@@ -89,7 +89,7 @@ def _learn_fps(scenario: str, seed: int, timesteps: int, n_threads: int,
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--scenario", default="LOW", choices=["LOW", "HIGH", "BURST"])
+    ap.add_argument("--scenario", default="LOW", help="LOW|HIGH|BURST slice the configured trace; with TRACE_PATTERN set, any generated scenario (incl. OVERLOAD, REPLAY) selects its own file")
     ap.add_argument("--seed", type=int, default=int(os.environ.get("RANDOM_SEED", "42")))
     ap.add_argument("--timesteps", type=int, default=6000,
                     help="timesteps per learn() measurement")

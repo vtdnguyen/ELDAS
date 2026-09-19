@@ -173,12 +173,15 @@ class RunningScalarNormalizer:
         Numerical floor added under the square-root of the variance.
     """
 
-    def __init__(self, center: bool = True, epsilon: float = 1e-8) -> None:
+    def __init__(self, center: bool = True, epsilon: float = 1e-8,
+                 freeze_after: int | None = None) -> None:
         self._n = 0
         self._mean = 0.0
         self._m2 = 0.0
         self._center = center
         self._epsilon = epsilon
+        self._freeze_after = freeze_after
+        self._frozen_std: float | None = None
 
     @property
     def count(self) -> int:
@@ -190,18 +193,49 @@ class RunningScalarNormalizer:
 
     @property
     def std(self) -> float:
+        if self._frozen_std is not None:
+            return self._frozen_std
         if self._n < 2:
             return 1.0
         var = self._m2 / (self._n - 1)
         return float(np.sqrt(var + self._epsilon))
 
+    @property
+    def frozen(self) -> bool:
+        """True once the scale has stopped tracking the incoming stream."""
+        return self._frozen_std is not None
+
     def update(self, x: float) -> None:
-        """Incorporate a new scalar sample (Welford's algorithm)."""
+        """Incorporate a new scalar sample (Welford's algorithm).
+
+        Stops updating once ``freeze_after`` samples have been seen, if that
+        was requested. Freezing matters for the CONSTRAINT signal and is a
+        correctness issue, not a tuning knob:
+
+        A running scale divides the cost by a std estimated from the same
+        stream, so ``J = mean(c)/std(c)`` measures the *shape* of the cost
+        distribution rather than its level. A policy that halves its raw cost
+        also roughly halves that std, so J barely moves and the budget ``d``
+        has nothing to grip. Measured on a full campaign: at LOW, driving
+        lambda from 0 to 3.61 cut raw C_SLA by 10.6% while J went UP by 2.2%;
+        at REPLAY the two moved in opposite directions again. The dual loop
+        was pushing on a quantity decoupled from the objective it was meant
+        to constrain.
+
+        With the scale frozen, ``c_n`` is a fixed multiple of the raw cost, so
+        ``J`` is proportional to mean raw cost per step and ``d`` becomes a
+        (rescaled) physical target. Freeze late enough that the estimate is
+        stable: a few episodes of samples is plenty.
+        """
+        if self._frozen_std is not None:
+            return
         self._n += 1
         delta = float(x) - self._mean
         self._mean += delta / self._n
         delta2 = float(x) - self._mean
         self._m2 += delta * delta2
+        if self._freeze_after is not None and self._n >= self._freeze_after:
+            self._frozen_std = self.std
 
     def normalize(self, x: float) -> float:
         """Normalise a scalar using running statistics (no state update)."""

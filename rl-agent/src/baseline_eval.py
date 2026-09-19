@@ -29,6 +29,11 @@ from typing import Any
 
 import numpy as np
 
+import sys
+from pathlib import Path as _P
+sys.path.insert(0, str(_P(__file__).resolve().parent.parent))
+from eval import paths
+
 from environment import CloudSimEnv
 from tracker import ExperimentTracker
 
@@ -95,6 +100,11 @@ def evaluate_baseline(
         # Java's getSlaCost). This is the SLA objective every method is scored
         # on, so heuristics share the axis with the CMDP sweep and NSGA-II.
         "total_sla_cost": episode_info.get("total_sla_cost", 0.0),
+        # W6.1 — the drop count belongs in the comparison row, not only in the
+        # log. It is the reference the CMDP policy is judged against: an agent
+        # that drops more tasks than the best heuristic is buying energy by
+        # throwing work away, which is exactly what W3 was built to expose.
+        "dropped_tasks": int(episode_info.get("dropped_tasks", 0)),
     }
 
 
@@ -214,7 +224,7 @@ def main() -> None:
         description="Run baseline scheduler evaluations"
     )
     parser.add_argument(
-        "--scenario", default="HIGH", choices=["LOW", "HIGH", "BURST"],
+        "--scenario", default="HIGH",
         help="Load scenario (default: HIGH)"
     )
     parser.add_argument(
@@ -230,6 +240,9 @@ def main() -> None:
         help="Disable WandB logging"
     )
     args = parser.parse_args()
+
+    # R5/R6: refuse to write WM-1 output onto the LEGACY results.
+    paths.guard_results_root(args.output, what="baseline evaluation")
 
     seed = args.seed or int(os.environ.get("RANDOM_SEED", "42"))
 

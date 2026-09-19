@@ -280,8 +280,9 @@ def test_baseline_action(env: CloudSimEnv) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="ELDAS smoke test (T4.5)")
     parser.add_argument("--scenario", default="LOW",
-                        choices=["LOW", "HIGH", "BURST"],
-                        help="Load scenario (default: LOW for quick smoke test)")
+                        help="LOW|HIGH|BURST slice the configured trace; with "
+                             "TRACE_PATTERN set, any generated scenario (incl. "
+                             "OVERLOAD, REPLAY) selects its own file")
     parser.add_argument("--seed", type=int, default=None,
                         help="Random seed (default: from env)")
     parser.add_argument("--max-steps", type=int, default=5000,

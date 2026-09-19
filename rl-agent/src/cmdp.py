@@ -74,6 +74,7 @@ class CMDPRewardWrapper(gym.Wrapper):
         pid: Any,
         normalize: bool = True,
         center_energy: bool = True,
+        cost_freeze_after: int | None = None,
     ) -> None:
         super().__init__(env)
         self._pid = pid
@@ -82,8 +83,13 @@ class CMDPRewardWrapper(gym.Wrapper):
         self._energy_norm = (
             RunningScalarNormalizer(center=center_energy) if normalize else None
         )
+        # cost_freeze_after: stop the CONSTRAINT scale from tracking the policy.
+        # See RunningScalarNormalizer.update for the measurement that motivates
+        # it; without freezing, J is a shape statistic and the budget d cannot
+        # steer the run. None keeps the original running-scale behaviour.
         self._cost_norm = (
-            RunningScalarNormalizer(center=False) if normalize else None
+            RunningScalarNormalizer(center=False, freeze_after=cost_freeze_after)
+            if normalize else None
         )
 
         # Per-episode accumulators (reset in reset()).
