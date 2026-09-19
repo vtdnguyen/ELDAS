@@ -20,10 +20,17 @@ Key invariants (Lưu ý #8 / #15):
   * Consistent min/min orientation before any dominance / HV computation
     (Lưu ý #15).
 
-This module is pure NumPy for the geometry; HV / IGD+ delegate to pymoo's
-Pareto-compliant indicators when available (guarded import), with a small exact
-NumPy HV fallback for the 2-objective case so the metric is testable without
-pymoo.
+This module is pure NumPy for the geometry; HV / IGD+ delegate to a Pareto-compliant
+indicator library when available, with a small exact NumPy implementation for the
+2-objective case so the metric is testable — and auditable — without any library.
+
+**Three backends** (W5.1): ``pymoo``, ``moocore`` and ``numpy``. Three rather than two on
+purpose. Both libraries implement the same published definitions, so if all three agree to
+1e-6 on the hand-worked cases, a bug would have to be present *identically* in an
+independent C implementation (moocore is the reference implementation from the group that
+introduced IGD+ and the EAF), in pymoo, and in our own sweep-line — which is not a
+plausible coincidence. Two agreeing is much weaker evidence, because a shared
+misunderstanding of the definition is exactly the failure mode that matters here.
 """
 
 from __future__ import annotations
@@ -34,6 +41,61 @@ try:
     from .nsga2_baseline import non_dominated
 except ImportError:  # pragma: no cover - direct-script fallback
     from nsga2_baseline import non_dominated
+
+
+# ── Backends (W5.1) ─────────────────────────────────────────────────────────
+
+#: Preference order for ``backend="auto"``. pymoo first only because it is the pinned
+#: dependency the campaign already runs on; the numbers are identical.
+BACKENDS = ("pymoo", "moocore", "numpy")
+
+
+class BackendUnavailable(RuntimeError):
+    """An explicitly requested backend is not installed."""
+
+
+def _have(name: str) -> bool:
+    if name == "numpy":
+        return True
+    try:
+        if name == "pymoo":
+            import pymoo.indicators.hv  # noqa: F401
+        elif name == "moocore":
+            import moocore  # noqa: F401
+        else:
+            return False
+    except ImportError:
+        return False
+    return True
+
+
+def available_backends() -> tuple[str, ...]:
+    """Which backends this environment can actually run."""
+    return tuple(b for b in BACKENDS if _have(b))
+
+
+def resolve_backend(backend: str | None, use_pymoo: bool = True) -> str:
+    """Pick the backend to run, honouring the legacy ``use_pymoo`` flag.
+
+    An **explicitly named** backend that is missing raises instead of falling back. That
+    matters more than it looks: the whole value of the three-way cross-check is that the
+    three names run three different implementations, and a silent fallback would let the
+    agreement test pass while comparing NumPy against itself.
+    """
+    if backend is None:
+        backend = "auto" if use_pymoo else "numpy"
+    if backend == "auto":
+        for b in BACKENDS:
+            if _have(b):
+                return b
+        return "numpy"                                  # pragma: no cover - always true
+    if backend not in BACKENDS:
+        raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+    if not _have(backend):
+        raise BackendUnavailable(
+            f"backend {backend!r} requested but not installed "
+            f"(available: {available_backends()})")
+    return backend
 
 
 # ── Fixed reference geometry (Lưu ý #8) ─────────────────────────────────────
@@ -102,21 +164,29 @@ def _hv_2d_exact(F_norm: np.ndarray, ref: np.ndarray) -> float:
 
 
 def hypervolume(
-    F: np.ndarray, ideal: np.ndarray, nadir: np.ndarray, use_pymoo: bool = True
+    F: np.ndarray, ideal: np.ndarray, nadir: np.ndarray, use_pymoo: bool = True,
+    backend: str | None = None,
 ) -> float:
     """Normalised hypervolume of front ``F`` against the fixed (ideal, nadir).
 
     Reference point in normalised space is (1,1). Returns 0 for an empty or
     fully-dominated (outside-the-box) front.
+
+    ``backend`` selects the implementation (:data:`BACKENDS`); ``None`` keeps the legacy
+    ``use_pymoo`` behaviour, so every existing call site is unchanged.
     """
     F_norm = normalize(F, ideal, nadir)
     ref = np.ones(F_norm.shape[1])
-    if use_pymoo:
-        try:
-            from pymoo.indicators.hv import HV
-            return float(HV(ref_point=ref)(F_norm))
-        except ImportError:
-            pass
+    chosen = resolve_backend(backend, use_pymoo)
+
+    if chosen == "pymoo":
+        from pymoo.indicators.hv import HV
+        return float(HV(ref_point=ref)(F_norm))
+    if chosen == "moocore":
+        import moocore
+        # moocore minimises by default and ignores points outside the reference box,
+        # matching both the pymoo indicator and _hv_2d_exact.
+        return float(moocore.hypervolume(F_norm, ref=ref))
     if F_norm.shape[1] != 2:  # pragma: no cover - only 2-obj in Phase 2
         raise ValueError("NumPy HV fallback supports 2 objectives only")
     return _hv_2d_exact(F_norm, ref)
@@ -147,16 +217,20 @@ def igd_plus(
     ideal: np.ndarray,
     nadir: np.ndarray,
     use_pymoo: bool = True,
+    backend: str | None = None,
 ) -> float:
     """Normalised IGD+ of ``F`` against ``reference_front`` (lower = better)."""
     A_norm = normalize(F, ideal, nadir)
     R_norm = normalize(reference_front, ideal, nadir)
-    if use_pymoo:
-        try:
-            from pymoo.indicators.igd_plus import IGDPlus
-            return float(IGDPlus(R_norm)(A_norm))
-        except ImportError:
-            pass
+    chosen = resolve_backend(backend, use_pymoo)
+
+    if chosen == "pymoo":
+        from pymoo.indicators.igd_plus import IGDPlus
+        return float(IGDPlus(R_norm)(A_norm))
+    if chosen == "moocore":
+        import moocore
+        # moocore's `ref` is the reference SET (same role as pymoo's IGDPlus(R)).
+        return float(moocore.igd_plus(A_norm, ref=R_norm))
     return _igd_plus_np(A_norm, R_norm)
 
 
@@ -177,6 +251,7 @@ def evaluate_methods(
     reference_front: np.ndarray | None = None,
     nadir_margin: float = 0.10,
     use_pymoo: bool = True,
+    backend: str | None = None,
 ) -> dict:
     """Compute HV + IGD+ for every method under ONE fixed reference geometry.
 
@@ -195,6 +270,7 @@ def evaluate_methods(
     all_F = stack_points(method_points)
     ideal = ideal_point(all_F)
     nadir = nadir_point(all_F, margin=nadir_margin)
+    chosen = resolve_backend(backend, use_pymoo)
 
     ref_front = (union_reference_front(method_points)
                  if reference_front is None
@@ -208,8 +284,8 @@ def evaluate_methods(
                              "n_points": 0}
             continue
         results[name] = {
-            "hypervolume": hypervolume(pts, ideal, nadir, use_pymoo=use_pymoo),
-            "igd_plus": igd_plus(pts, ref_front, ideal, nadir, use_pymoo=use_pymoo),
+            "hypervolume": hypervolume(pts, ideal, nadir, backend=chosen),
+            "igd_plus": igd_plus(pts, ref_front, ideal, nadir, backend=chosen),
             "n_points": int(len(pts)),
         }
 
@@ -219,5 +295,7 @@ def evaluate_methods(
         "reference_front": ref_front.tolist(),
         "objectives": ["energy_kwh", "sla_cost"],
         "sense": ["min", "min"],
+        # Recorded so a results file says which implementation produced its numbers.
+        "backend": chosen,
         "methods": results,
     }

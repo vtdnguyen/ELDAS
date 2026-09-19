@@ -10,6 +10,7 @@ units to the DES ``C_SLA`` (CLAUDE.md Lưu ý #5).
 from __future__ import annotations
 
 import csv
+import os
 from dataclasses import dataclass
 
 from . import qos as qos_mod
@@ -46,8 +47,10 @@ class Task:
 
     @property
     def deadline(self) -> float:
-        """creation + duration × slack(qos) — matches Java derivation."""
-        return self.creation_time + self.duration * qos_mod.qos_slack_factor(self.qos)
+        """creation + duration × slack(qos) + slack_floor(qos) — matches Java (W1.5)."""
+        return (self.creation_time
+                + self.duration * qos_mod.qos_slack_factor(self.qos)
+                + qos_mod.qos_slack_floor_sec(self.qos))
 
     @property
     def needs_gpu(self) -> bool:
@@ -110,21 +113,99 @@ _LOW_FRACTION = 0.25
 _BURST_WINDOW_SEC = 3600.0
 _BURST_PERCENTILE = 0.80
 
+#: Labels that select a Phase-1 slice of a single trace file. The historical spelling
+#: ("LOW") and the explicit one ("LEGACY_LOW") both work, exactly as
+#: ``ScenarioFilter.Scenario.fromLabel`` does on the Java side (W2.3).
+_LEGACY_ALIASES = {
+    "LOW": "LEGACY_LOW", "LEGACY_LOW": "LEGACY_LOW",
+    "HIGH": "LEGACY_HIGH", "LEGACY_HIGH": "LEGACY_HIGH",
+    "BURST": "LEGACY_BURST", "LEGACY_BURST": "LEGACY_BURST",
+}
+
+#: Passthrough. A WM-1 trace is already one scenario, so slicing it again would destroy
+#: the offered load and burstiness it was calibrated to (W2.2).
+PASSTHROUGH = "NONE"
+
+#: Scenarios that exist only as generated WM-1 traces — there is no legacy slice that
+#: produces them, so asking for one by name is a mistake worth naming.
+_WM1_ONLY = ("OVERLOAD", "REPLAY")
+
 
 def filter_scenario(tasks: list[Task], scenario: str) -> list[Task]:
-    """Apply the LOW / HIGH / BURST filter (Pending tasks always excluded)."""
+    """Apply the legacy slice, or pass a WM-1 trace through unchanged.
+
+    ``Pending`` pods are always excluded, on every path, because the simulator never
+    schedules them.
+    """
     schedulable = [t for t in tasks if t.pod_phase != "Pending"]
-    scenario = scenario.upper()
-    if scenario == "HIGH":
+    label = scenario.strip().upper()
+
+    if label == PASSTHROUGH:
         return list(schedulable)
-    if scenario == "LOW":
+
+    canonical = _LEGACY_ALIASES.get(label)
+    if canonical == "LEGACY_HIGH":
+        return list(schedulable)
+    if canonical == "LEGACY_LOW":
         if not schedulable:
             return []
         count = max(1, int(len(schedulable) * _LOW_FRACTION))
         return list(schedulable[:count])
-    if scenario == "BURST":
+    if canonical == "LEGACY_BURST":
         return _filter_burst(schedulable)
-    raise ValueError(f"unknown scenario: {scenario}")
+
+    if label in _WM1_ONLY:
+        raise ValueError(
+            f"'{scenario}' exists only as a generated WM-1 trace; load that file and "
+            f"pass scenario='{PASSTHROUGH}' instead of asking the legacy filter for it")
+    raise ValueError(
+        f"unknown scenario: {scenario} (expected one of "
+        f"{sorted(set(_LEGACY_ALIASES))} or '{PASSTHROUGH}')")
+
+
+def resolve_trace_path(scenario: str, seed: int, *,
+                       trace: str | None = None,
+                       pattern: str | None = None,
+                       default: str = "/data/trace/openb_pod_list_default.csv") -> str:
+    """Python mirror of ``SimulationConfig.resolveTracePath`` (W2.2).
+
+    The offline evaluators — above all the NSGA-II reference front — must read the
+    *same* file the simulator does. If they silently kept reading the legacy trace while
+    the DES ran WM-1, the reference front and the measured points would describe
+    different workloads and every hypervolume comparison against it would be meaningless.
+
+    Precedence: explicit ``trace`` argument, then ``TRACE_PATTERN``, then ``TRACE_FILE``,
+    then ``default`` — matching the Java resolution order.
+
+    Raises:
+        ValueError: if a pattern has no ``{scenario}`` placeholder (every scenario would
+            resolve to one file) or resolves to something unreadable. Both are raised
+            rather than absorbed, because a silent fallback produces a complete and
+            entirely wrong set of results.
+    """
+    if trace:
+        return trace
+
+    pattern = pattern if pattern is not None else os.environ.get("TRACE_PATTERN", "")
+    if not pattern.strip():
+        return os.environ.get("TRACE_FILE", "").strip() or default
+
+    if "{scenario}" not in pattern:
+        raise ValueError(
+            f"TRACE_PATTERN={pattern!r} has no {{scenario}} placeholder, so every "
+            f"scenario would resolve to the same file")
+    path = pattern.replace("{scenario}", scenario).replace("{seed}", str(seed))
+    if not os.path.isfile(path):
+        raise ValueError(
+            f"TRACE_PATTERN resolved to {path!r} (scenario={scenario}, seed={seed}) "
+            f"which does not exist; generate it with scripts/gen-workloads.sh")
+    return path
+
+
+def uses_trace_pattern(pattern: str | None = None) -> bool:
+    """True when traces are selected per scenario rather than read from one file."""
+    p = pattern if pattern is not None else os.environ.get("TRACE_PATTERN", "")
+    return bool(p.strip())
 
 
 def _filter_burst(tasks: list[Task]) -> list[Task]:

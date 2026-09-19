@@ -65,6 +65,109 @@ def test_hypervolume_pymoo_matches_numpy_fallback():
     assert hv_pm == pytest.approx(hv_np, rel=1e-6)
 
 
+# ── W5.1 — three independent backends must agree ────────────────────────────
+#
+# Two agreeing implementations is weak evidence: the failure that matters here is a shared
+# misreading of a published definition (IGD+ vs IGD, whether points outside the reference
+# box count, whether the reference point is inclusive), and two libraries can misread it
+# the same way. A third — moocore, the reference C implementation from the group that
+# introduced IGD+ and the EAF — makes that coincidence implausible.
+
+UNIT = (np.zeros(2), np.ones(2))
+
+#: (label, front, expected HV against the unit reference box). The expectations are the
+#: hand-worked values already pinned above, so this table checks the BACKENDS against
+#: arithmetic, not merely against each other.
+HV_CASES = [
+    ("single point", np.array([[0.2, 0.3]]), 0.56),
+    ("two points, overlapping boxes", np.array([[0.2, 0.6], [0.5, 0.3]]), 0.47),
+    ("dominated + outside-the-box points ignored",
+     np.array([[0.2, 0.3], [0.5, 0.5], [1.2, 0.1]]), 0.56),
+    ("three-point staircase", np.array([[0.2, 0.6], [0.5, 0.3], [0.8, 0.1]]), 0.51),
+    ("point on the reference corner contributes nothing",
+     np.array([[1.0, 0.5]]), 0.0),
+    ("ideal corner dominates the whole box", np.array([[0.0, 0.0]]), 1.0),
+]
+
+#: (label, approximation, reference set, expected IGD+).
+IGD_CASES = [
+    ("single reference point", np.array([[0.2, 0.2]]), np.array([[0.0, 0.0]]),
+     math.sqrt(0.08)),
+    ("approximation dominates the reference ⇒ 0", np.array([[0.0, 0.0]]),
+     np.array([[0.5, 0.5]]), 0.0),
+    ("two approximation points, one reference",
+     np.array([[0.0, 0.5], [0.5, 0.0]]), np.array([[0.0, 0.0]]), 0.5),
+    ("identical sets ⇒ 0", np.array([[0.1, 0.9], [0.9, 0.1]]),
+     np.array([[0.1, 0.9], [0.9, 0.1]]), 0.0),
+]
+
+
+def _backends_or_skip(*needed):
+    have = pm.available_backends()
+    missing = [b for b in needed if b not in have]
+    if missing:
+        pytest.skip(f"backend(s) not installed: {missing} (have {have})")
+
+
+@pytest.mark.parametrize("label,F,expected", HV_CASES, ids=[c[0] for c in HV_CASES])
+def test_hv_agrees_across_all_three_backends(label, F, expected):
+    _backends_or_skip("pymoo", "moocore")
+    ideal, nadir = UNIT
+    values = {b: pm.hypervolume(F, ideal, nadir, backend=b) for b in pm.BACKENDS}
+    for b, v in values.items():
+        assert v == pytest.approx(expected, rel=1e-6, abs=1e-12), f"{b}: {values}"
+
+
+@pytest.mark.parametrize("label,A,R,expected", IGD_CASES, ids=[c[0] for c in IGD_CASES])
+def test_igd_plus_agrees_across_all_three_backends(label, A, R, expected):
+    _backends_or_skip("pymoo", "moocore")
+    ideal, nadir = UNIT
+    values = {b: pm.igd_plus(A, R, ideal, nadir, backend=b) for b in pm.BACKENDS}
+    for b, v in values.items():
+        assert v == pytest.approx(expected, rel=1e-6, abs=1e-12), f"{b}: {values}"
+
+
+def test_evaluate_methods_agrees_across_backends_end_to_end():
+    """The agreement must survive the real entry point, not just the kernels.
+
+    Normalisation, the shared nadir and the union reference front all sit between the raw
+    points and the indicator; a backend swap must not perturb any of them.
+    """
+    _backends_or_skip("pymoo", "moocore")
+    method_points = {
+        "good": np.array([[10.0, 100.0], [12.0, 60.0], [14.0, 40.0]]),
+        "bad": np.array([[13.0, 120.0], [16.0, 90.0], [18.0, 80.0]]),
+    }
+    runs = {b: pm.evaluate_methods(method_points, backend=b) for b in pm.BACKENDS}
+    for name in ("good", "bad"):
+        hvs = [runs[b]["methods"][name]["hypervolume"] for b in pm.BACKENDS]
+        igds = [runs[b]["methods"][name]["igd_plus"] for b in pm.BACKENDS]
+        assert hvs[1] == pytest.approx(hvs[0], rel=1e-6)
+        assert hvs[2] == pytest.approx(hvs[0], rel=1e-6)
+        assert igds[1] == pytest.approx(igds[0], rel=1e-6, abs=1e-12)
+        assert igds[2] == pytest.approx(igds[0], rel=1e-6, abs=1e-12)
+    assert runs["moocore"]["backend"] == "moocore"
+
+
+def test_a_named_missing_backend_raises_instead_of_falling_back(monkeypatch):
+    """A silent fallback would let the three-way test compare NumPy with itself."""
+    monkeypatch.setattr(pm, "_have", lambda name: name == "numpy")
+    with pytest.raises(pm.BackendUnavailable, match="moocore"):
+        pm.resolve_backend("moocore")
+    # "auto" is allowed to fall back — that is what "auto" means.
+    assert pm.resolve_backend("auto") == "numpy"
+
+
+def test_unknown_backend_name_is_rejected():
+    with pytest.raises(ValueError, match="unknown backend"):
+        pm.resolve_backend("scipy")
+
+
+def test_legacy_use_pymoo_flag_still_selects_the_old_behaviour():
+    assert pm.resolve_backend(None, use_pymoo=False) == "numpy"
+    assert pm.resolve_backend(None, use_pymoo=True) in pm.BACKENDS
+
+
 # ── IGD+ (exact, hand-computed) ─────────────────────────────────────────────
 
 def test_igd_plus_single_reference():

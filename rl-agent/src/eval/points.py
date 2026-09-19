@@ -32,13 +32,41 @@ class PointRecord:
         return (self.energy_kwh, self.sla_cost)
 
 
-def save_points(points: list[PointRecord], path: str | Path) -> None:
-    """Append/write points as JSON Lines (creates parent dirs)."""
+def save_points(points: list[PointRecord], path: str | Path, *,
+                merge: bool = False) -> None:
+    """Write points as JSON Lines (creates parent dirs).
+
+    ``merge=False`` (default) replaces the file with exactly ``points``.
+
+    ``merge=True`` folds ``points`` into whatever is already there, keyed by
+    ``(method, seed)``. Use it whenever a run produces a **subset** of the seeds the
+    file is meant to hold — extending a campaign with more seeds, or re-running a few
+    that failed. Replacing rather than appending keeps it idempotent: re-running the
+    same (method, seed) overwrites its row instead of adding a duplicate that would
+    silently double-weight that seed in every mean and confidence interval.
+
+    This parameter exists because its absence cost real data. The docstring used to say
+    "Append/write" while the code opened the file ``"w"``, and a run that added seeds
+    47–56 to a sweep **erased** seeds 42–46 — no error, no warning, and the resulting
+    table looked entirely normal apart from the learned methods quietly resting on ten
+    seeds while the baselines rested on fifteen.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows = [asdict(p) for p in points]
+    if merge and path.exists():
+        by_key: dict[tuple, dict] = {}
+        for existing in load_points(path):
+            d = asdict(existing)
+            by_key[(d.get("method"), d.get("seed"))] = d
+        for d in rows:                       # cái mới ghi đè cái cũ cùng khoá
+            by_key[(d.get("method"), d.get("seed"))] = d
+        rows = [by_key[k] for k in sorted(by_key, key=lambda k: (str(k[0]), k[1]))]
+
     with open(path, "w") as f:
-        for p in points:
-            f.write(json.dumps(asdict(p)) + "\n")
+        for d in rows:
+            f.write(json.dumps(d) + "\n")
 
 
 def load_points(path: str | Path) -> list[PointRecord]:

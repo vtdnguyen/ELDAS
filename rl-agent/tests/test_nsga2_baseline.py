@@ -41,7 +41,8 @@ def test_task_derived_fields_match_java_formulas():
     assert t.pes_needed == 32                      # max(1, cpu_milli//1000)
     assert t.duration == 100.0                     # deletion - max(creation, scheduled)
     assert t.qos_weight == 3.0                     # κ(LS)
-    assert t.deadline == pytest.approx(110.0)      # creation + dur*slack(LS=1.1)
+    # W1.5: creation + dur*slack(LS=1.1) + floor(LS)=106 -> 0 + 110 + 106
+    assert t.deadline == pytest.approx(216.0)
     assert not t.needs_gpu
 
 
@@ -67,29 +68,47 @@ def test_evaluate_matches_hand_computation():
     #   total = 59000 Ws → 0.0163889 kWh
     assert energy_kwh == pytest.approx(59000.0 / 3_600_000.0, rel=1e-9)
 
-    # SLA: load=32/64=0.5 → congestion=1.5 → completion=150; deadline=110
-    #      tardiness=40; κ=3 → 120
-    assert sla_cost == pytest.approx(120.0, rel=1e-9)
+    # SLA: load=32/64=0.5 → congestion=1.5 → completion=150; deadline=110+106=216.
+    # No violation: the W1.5 absolute floor absorbs a 50 s slowdown on a 100 s job,
+    # which is exactly what it exists to do — before the floor this job was charged
+    # 120 units of C_SLA for a delay smaller than a host wake-up.
+    assert sla_cost == pytest.approx(0.0, abs=1e-12)
+
+
+def test_sla_cost_charges_once_the_slowdown_exceeds_the_floor():
+    """The floor delays the onset of C_SLA; it must not remove it."""
+    hosts = topo_mod.homogeneous(10)
+    task = _task("t", cpu_milli=32000, dur=10_000.0, qos="LS")
+    model = StaticPlacementModel(hosts, [task])
+
+    _, sla_cost = model.evaluate(np.array([0]))
+
+    # load=32/64=0.5 → congestion=1.5 → completion=15000
+    # deadline = 10000*1.1 + 106 = 11106 → tardiness = 3894, κ=3 → 11682
+    assert sla_cost == pytest.approx(11682.0, rel=1e-9)
 
 
 def test_sla_cost_uses_same_units_as_java_c_sla():
     # C_SLA = Σ κ·max(0, completion − deadline); reproduce for 2 tasks by hand.
     hosts = topo_mod.homogeneous(2)
-    t1 = _task("a", cpu_milli=64000, dur=100, qos="LS")   # pes=64 → load=1 → cong=2
-    t2 = _task("b", cpu_milli=64000, dur=100, qos="BE")   # BE slack 3.0 → generous
+    t1 = _task("a", cpu_milli=64000, dur=10_000, qos="LS")   # pes=64 → load=1 → cong=2
+    t2 = _task("b", cpu_milli=64000, dur=10_000, qos="BE")   # BE slack 3.0 → generous
     model = StaticPlacementModel(hosts, [t1, t2])
     # Both onto host 0: load=min(1,128/64)=1 → congestion 2.
     _, sla = model.evaluate(np.array([0, 0]))
-    # t1: completion=200, deadline=110 → tard=90, κ=3 → 270
-    # t2: completion=200, deadline=0+100*3=300 → tard=0 → 0
-    assert sla == pytest.approx(270.0, rel=1e-9)
+    # t1: completion=20000, deadline=10000*1.1+106=11106 → tard=8894, κ=3 → 26682
+    # t2: completion=20000, deadline=10000*3.0+2120=32120 → tard=0 → 0
+    assert sla == pytest.approx(26682.0, rel=1e-9)
 
 
 # ── The Pareto tension: pack ⇒ less energy, more SLA ─────────────────────────
 
 def test_packing_trades_energy_for_sla():
     hosts = topo_mod.homogeneous(10)
-    tasks = [_task(f"t{i}", cpu_milli=8000, dur=100, qos="LS", creation=i * 1.0)
+    # Durations must exceed the W1.5 absolute floor for the tension to be visible at
+    # all: with 100 s jobs both placements now sit at zero SLA cost, which is correct
+    # behaviour but tests nothing.
+    tasks = [_task(f"t{i}", cpu_milli=8000, dur=10_000, qos="LS", creation=i * 1.0)
              for i in range(30)]
     model = StaticPlacementModel(hosts, tasks)
 
@@ -200,8 +219,21 @@ def test_nsga2_front_is_feasible_and_non_dominated():
         assert model.is_feasible(row)
     # The reported front is genuinely non-dominated.
     assert non_dominated(F).all()
-    # Front is bounded by the analytic anchors on the energy axis.
-    e_packed = result["packed"][0]
-    e_spread = result["spread"][0]
-    assert F[:, 0].min() <= e_spread + 1e-6
-    assert F[:, 0].min() >= e_packed - 1e-6
+    # A reference front must not be dominated by a trivial heuristic anchor.
+    #
+    # This replaces an earlier bound, `front_min_energy >= packed_energy`, which was
+    # never a real invariant: `packed` is a heuristic (everything onto the first
+    # feasible host), not the energy optimum, and on the heterogeneous topology packing
+    # onto the cheapest SKU beats it. The old assertion only held incidentally because
+    # SLA cost used to push solutions away from that region; once the W1.5 deadline
+    # floor stopped charging short jobs, NSGA-II was free to find the better packing and
+    # the assertion fired on a *correct* result.
+    for label in ("packed", "spread"):
+        e_a, s_a = result[label]
+        for row in F:
+            dominates = (e_a <= row[0] + 1e-12 and s_a <= row[1] + 1e-12
+                         and (e_a < row[0] - 1e-12 or s_a < row[1] - 1e-12))
+            assert not dominates, (
+                f"the {label} anchor ({e_a:.6g}, {s_a:.6g}) dominates a reference-front "
+                f"point ({row[0]:.6g}, {row[1]:.6g})")
+    assert F[:, 0].min() > 0.0

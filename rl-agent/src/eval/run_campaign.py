@@ -43,10 +43,12 @@ try:
     from .aggregate import aggregate_by_method
     from .points import PointRecord, load_points, method_points_dict, save_points
     from . import pareto_metrics as pm
+    from . import paths
 except ImportError:  # pragma: no cover - direct-script fallback
     from eval.aggregate import aggregate_by_method
     from eval.points import PointRecord, load_points, method_points_dict, save_points
     from eval import pareto_metrics as pm
+    from eval import paths
 
 
 HEURISTICS = ["roundrobin", "random", "k8s", "firstfit", "bestfit"]
@@ -74,7 +76,8 @@ def collect_baseline_points(
                     method=policy, scenario=scenario, seed=seed,
                     energy_kwh=float(r["total_energy_kwh"]),
                     sla_cost=float(r["total_sla_cost"]),
-                    extra={"steps": r["steps"]},
+                    extra={"steps": r["steps"],
+                           "dropped_tasks": int(r.get("dropped_tasks", 0))},
                 ))
                 print(f"[campaign] {policy:>11} seed={seed}: "
                       f"E={r['total_energy_kwh']:.2f} kWh  "
@@ -168,6 +171,21 @@ def load_ppo_min_points(results_dir: Path, scenario: str) -> list[PointRecord]:
     )]
 
 
+def load_ppo_fixed_points(results_dir: Path, scenario: str) -> list[PointRecord]:
+    """Load the fixed-weight PPO *front* (``eval/ppo_fixed_sweep.py``), if present.
+
+    ``ppo-fixed-{scenario}/points.jsonl`` holds one point per (weight, seed) with
+    the same schema as the CMDP sweep. Each weight is a ``ppo-w{w}`` method, so
+    ``aggregate_by_method`` gives it mean ± CI over seeds, and ``metric_family``
+    collapses ``ppo-w*`` into ONE ``ppo-fixed`` family — hypervolume/IGD+ then
+    score the fixed-weight front against the CMDP-PID front (front-to-front, the
+    fair comparison). When this file exists it SUPERSEDES the single-point
+    ``ppo-min`` reference (which stays as the fallback for older runs).
+    """
+    path = results_dir / f"ppo-fixed-{scenario}" / "points.jsonl"
+    return load_points(path) if path.exists() else []
+
+
 # ── Grouping for the metrics ────────────────────────────────────────────────
 
 def metric_family(method: str) -> str:
@@ -175,9 +193,18 @@ def metric_family(method: str) -> str:
 
     The CMDP-PID *method* produces a whole front (one policy per budget d), so
     its achievable set — not each budget in isolation — is what should be scored
-    against the heuristics' single operating points.
+    against the heuristics' single operating points. Symmetrically, the
+    fixed-weight PPO produces a front by sweeping the scalarisation weight, so its
+    ``ppo-w*`` operating points collapse into one ``ppo-fixed`` family — the
+    front-to-front comparison against CMDP-PID (manual weight tuning vs.
+    principled budget tuning).
     """
-    return "cmdp-pid" if method.lower().startswith("cmdp") else method
+    m = method.lower()
+    if m.startswith("cmdp"):
+        return "cmdp-pid"
+    if m.startswith("ppo-w"):
+        return "ppo-fixed"
+    return method
 
 
 def family_points_dict(
@@ -231,8 +258,8 @@ def build_table(agg: dict, metrics: dict, scenario: str, min_seeds: int = 5,
     lines = [
         f"### Campaign summary — {scenario}",
         "",
-        "| Method | seeds | Energy kWh (mean ± 95% CI) | C_SLA (mean ± 95% CI) | HV ↑ | IGD+ ↓ |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Method | seeds | Energy kWh (mean ± 95% CI) | C_SLA (mean ± 95% CI) | dropped | HV ↑ | IGD+ ↓ |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for name in sorted(agg):
         a = agg[name]
@@ -243,8 +270,14 @@ def build_table(agg: dict, metrics: dict, scenario: str, min_seeds: int = 5,
         igd_cell = f"{igd:.4f}" if igd is not None else "–"
         energy_cell = _fmt_ci(a["energy"].mean, a["energy"].ci95, ".2f")
         sla_cell = _fmt_ci(a["sla"].mean, a["sla"].ci95, ".4g")
+        # W6.1/W3: a method that meets its SLA budget by leaving tasks unplaced has
+        # changed the problem rather than solved it, and energy computed over fewer
+        # tasks is not comparable with energy that placed them all (R10). Without this
+        # column that failure reads as a clean win in every other cell of the row.
+        drops = a.get("dropped")
+        drop_cell = "–" if drops is None else f"{drops:.0f}"
         lines.append(
-            f"| {name} | {a['n']} | {energy_cell} | {sla_cell} "
+            f"| {name} | {a['n']} | {energy_cell} | {sla_cell} | {drop_cell} "
             f"| {hv_cell} | {igd_cell} |"
         )
     if NSGA2_METHOD in metrics["methods"]:
@@ -312,10 +345,18 @@ def run_campaign(
         print(f"[campaign] + {len(sweep)} CMDP sweep point(s)")
     points += sweep
 
-    ppo_min = load_ppo_min_points(results_dir, scenario)
-    if ppo_min:
-        print(f"[campaign] + fixed-weight PPO (ppo-min) reference point")
-    points += ppo_min
+    ppo_fixed = load_ppo_fixed_points(results_dir, scenario)
+    if ppo_fixed:
+        n_w = len({p.method for p in ppo_fixed})
+        print(f"[campaign] + fixed-weight PPO FRONT: {len(ppo_fixed)} point(s) "
+              f"across {n_w} weight(s) → 'ppo-fixed' family (front-to-front)")
+        points += ppo_fixed
+    else:
+        ppo_min = load_ppo_min_points(results_dir, scenario)
+        if ppo_min:
+            print(f"[campaign] + fixed-weight PPO (ppo-min) reference point (n=1 "
+                  f"fallback; run eval/ppo_fixed_sweep.py for a ≥5-seed front)")
+        points += ppo_min
 
     nsga2_front, nsga2_payload = load_nsga2_front(results_dir, scenario)
     nsga2_note = None
@@ -376,7 +417,7 @@ def run_campaign(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="G2.6 — full campaign table + Pareto figure")
-    ap.add_argument("--scenario", default="LOW", choices=["LOW", "HIGH", "BURST"])
+    ap.add_argument("--scenario", default="LOW", help="LOW|HIGH|BURST slice the configured trace; with TRACE_PATTERN set, any generated scenario (incl. OVERLOAD, REPLAY) selects its own file")
     ap.add_argument("--seeds", default="42,43,44,45,46",
                     help="comma-separated seeds (≥5 for reportable CI)")
     ap.add_argument("--results", default="/data/results")
@@ -389,6 +430,9 @@ def main() -> None:
                          "anyway (NOT advised: different evaluator/instance — see "
                          "nsga2_commensurable)")
     args = ap.parse_args()
+
+    # R5/R6: refuse to write WM-1 output onto the LEGACY results.
+    paths.guard_results_root(args.results, what="the campaign")
 
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
     run_campaign(args.scenario, seeds, Path(args.results),
