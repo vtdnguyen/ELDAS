@@ -1,4 +1,4 @@
-# ELDAS — Energy-aware Learning-based Datacenter AI Scheduler
+# ELDAS
 
 Bộ lập lịch học tăng cường đặt tác vụ AI lên máy chủ trong trung tâm dữ liệu, cân bằng **điện năng** và **trễ hạn**.
 
