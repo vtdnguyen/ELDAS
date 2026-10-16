@@ -56,7 +56,7 @@ SEEDS = (42, 43, 44, 45, 46)
 SOURCES = (
     ("philly", "Philly\n(Microsoft, 2 490 GPU)", "reference-traces/philly_data_training.csv", None),
     ("helios", "Helios\n(SenseTime, 6 416 GPU)", "reference-traces/helios_data_training.csv", None),
-    ("openb", "openb\n(Alibaba, in use)", "alibaba-trace/openb_pod_list_default.csv",
+    ("openb", "openb\n(Alibaba, đề tài dùng)", "alibaba-trace/openb_pod_list_default.csv",
      burstiness.SCHEDULABLE_ONLY),
 )
 
@@ -117,6 +117,15 @@ def measure_generated(trace_path: str, arm: str = "homo") -> list[dict]:
 
 # ── Figure ──────────────────────────────────────────────────────────────────
 
+#: Nhãn trục của panel A theo tên nguồn. Hình nằm trong báo cáo tiếng Việt, và JSON cũ
+#: còn giữ nhãn tiếng Anh, nên vẽ lại từ JSON vẫn phải ra nhãn đúng.
+SOURCE_LABELS = {
+    "philly": "Philly\n(Microsoft)",
+    "helios": "Helios\n(SenseTime)",
+    "openb": "openb\n(Alibaba)",
+}
+
+
 def plot(sources: list[dict], generated: list[dict], out_png: str) -> None:
     import matplotlib
     matplotlib.use("Agg")
@@ -129,7 +138,7 @@ def plot(sources: list[dict], generated: list[dict], out_png: str) -> None:
     # between the Helios and Philly medians in A — if they do not, the target is not
     # bracketed and the anchoring argument fails.
     fig, (ax_a, ax_b) = plt.subplots(
-        1, 2, figsize=(11.5, 5.0), sharey=True,
+        1, 2, figsize=(7.6, 4.3), sharey=True,
         gridspec_kw={"width_ratios": [1.25, 1.0]})
 
     # ── Panel A: measured burstiness of the real traces ─────────────────────
@@ -141,24 +150,26 @@ def plot(sources: list[dict], generated: list[dict], out_png: str) -> None:
             # distribution the data cannot support. Show the data.
             jitter = [x + 0.06 * ((i % 5) - 2) for i in range(len(vals))]
             ax_a.scatter(jitter, vals, s=34, alpha=0.75, color="#4c72b0", zorder=3,
-                         label="IDC(1h) in a 3-day window" if x == 0 else None)
+                         label="IDC(1h) trong một cửa sổ 3 ngày" if x == 0 else None)
             ax_a.hlines(s["idc_3d_median"], x - 0.22, x + 0.22, color="#4c72b0",
                         lw=2.5, zorder=4,
-                        label="median across windows" if x == 0 else None)
+                        label="trung vị theo cửa sổ" if x == 0 else None)
         ax_a.scatter([x], [s["idc_whole"]], marker="D", s=70, color="#c44e52", zorder=5,
-                     label="IDC(1h) over the whole trace" if x == 0 else None)
+                     label="IDC(1h) trên toàn bộ vết tải" if x == 0 else None)
 
     for t in targets:
         ax_a.axhline(t, ls="--", lw=1.2, color="#55a868", zorder=1)
-        ax_a.text(len(sources) - 0.42, t * 1.06, f"WM-1 target {t:g}",
-                  color="#55a868", fontsize=9, va="bottom", ha="right")
+        # Mép trái: ở mép phải nhãn "10" đè lên điểm toàn vết của openb (IDC ≈ 12).
+        ax_a.text(-0.5, t * 1.06, f"mục tiêu WM-1: {t:g}",
+                  color="#55a868", fontsize=9, va="bottom", ha="left")
 
     ax_a.set_yscale("log")
     ax_a.set_xticks(list(xs))
     ax_a.set_xlim(-0.55, len(sources) - 0.45)
-    ax_a.set_xticklabels([s["label"] for s in sources], fontsize=9)
-    ax_a.set_ylabel("IDC(1h) = Var(N) / E(N)   (log scale)")
-    ax_a.set_title("A. Measured burstiness — window length matters", fontsize=11, loc="left")
+    ax_a.set_xticklabels([SOURCE_LABELS.get(s["name"], s["label"]) for s in sources],
+                         fontsize=9)
+    ax_a.set_ylabel("IDC(1h) = Var(N) / E(N)   (thang log)")
+    ax_a.set_title("A. Mức dồn cục đo trên vết tải thật", fontsize=11, loc="left")
     ax_a.grid(axis="y", alpha=0.25)
     ax_a.legend(fontsize=8, loc="lower left", framealpha=0.9)
 
@@ -172,20 +183,23 @@ def plot(sources: list[dict], generated: list[dict], out_png: str) -> None:
     for x, g in zip(xs_b, gen):
         ax_b.scatter([x] * len(g["idc_values"]), g["idc_values"], s=34, alpha=0.75,
                      color="#4c72b0", zorder=3,
-                     label="realised, per seed" if x == 0 else None)
+                     label="đo được, từng hạt giống" if x == 0 else None)
         ax_b.hlines(g["idc_target"], x - 0.28, x + 0.28, color="#55a868", lw=2.5,
-                    zorder=4, label="target" if x == 0 else None)
+                    zorder=4, label="mục tiêu" if x == 0 else None)
 
     ax_b.set_xticks(list(xs_b))
     ax_b.set_xlim(-0.6, len(gen) - 0.4)
     ax_b.set_xticklabels([g["scenario"] for g in gen], fontsize=9)
-    ax_b.set_title("B. What WM-1 generates (homo, 5 seeds)", fontsize=11, loc="left")
+    ax_b.set_title("B. WM-1 sinh ra (homo, 5 hạt giống)", fontsize=11,
+                  loc="left")
     ax_b.grid(axis="y", alpha=0.25)
     ax_b.legend(fontsize=8, loc="lower left", framealpha=0.9)
 
     fig.tight_layout()
     os.makedirs(os.path.dirname(out_png), exist_ok=True)
     fig.savefig(out_png, dpi=160)
+    # Bản vector cho báo cáo in: PNG 160 dpi bị vỡ chữ nhỏ khi in.
+    fig.savefig(os.path.splitext(out_png)[0] + ".pdf")
     plt.close(fig)
 
 
@@ -322,7 +336,19 @@ def main(argv=None) -> int:
     ap.add_argument("--arm", default="homo", choices=sorted(ARMS))
     ap.add_argument("--no-generated", action="store_true",
                     help="skip panel B (it refits the duty cycle, ~1 min)")
+    ap.add_argument("--replot", action="store_true",
+                    help="chỉ vẽ lại hình từ figures/burstiness-anchors.json đã có, "
+                         "không đo lại (đổi nhãn/kiểu hình mà không đụng tới số)")
     args = ap.parse_args(argv)
+
+    if args.replot:
+        fig_dir = os.path.join(args.out, "figures")
+        with open(os.path.join(fig_dir, "burstiness-anchors.json"), encoding="utf-8") as f:
+            d = json.load(f)
+        png = os.path.join(fig_dir, "burstiness-anchors.png")
+        plot(d["sources"], d["generated"], png)
+        print(f"[W4.4] replot -> {png}")
+        return 0
 
     sources = measure_sources(args.data_root)
     if not sources:

@@ -37,6 +37,46 @@ except (AttributeError, OSError):
 SURFACE, INK, MUTED, GRID = "#fcfcfb", "#1b1b1a", "#6b6b66", "#e5e5e0"
 ACCENT = ["#2f6f4f", "#a35b2a", "#3a5a8c", "#8c3a5a", "#6b6b2a"]
 
+# Tên hiển thị trùng với tên trong bảng của báo cáo; mã nội bộ (cmdp-pid, k8s...) không
+# được lộ ra hình, nếu không người đọc phải tự đoán "cmdp-pid" là "phương pháp đề xuất".
+DISPLAY = {
+    "cmdp-pid": "đề xuất",
+    "ppo-fixed": "trọng số cố định",
+    "firstfit": "first-fit",
+    "bestfit": "best-fit",
+    "k8s": "Kubernetes",
+    "random": "ngẫu nhiên",
+    "roundrobin": "quay vòng",
+}
+# Mỗi họ một màu VÀ một hình dấu riêng: bảy họ mà chỉ năm màu thì hai cặp trùng màu, và
+# bản in đen trắng chỉ còn phân biệt được bằng hình dấu.
+FAMILY_STYLE = {
+    "cmdp-pid": ("#2f6f4f", "o"),
+    "ppo-fixed": ("#a35b2a", "o"),
+    "firstfit": ("#3a5a8c", "s"),
+    "bestfit": ("#5f9ec7", "D"),
+    "k8s": ("#8c3a5a", "^"),
+    "random": ("#77776f", "v"),
+    "roundrobin": ("#b08a1e", "P"),
+}
+
+
+def _name(m: str) -> str:
+    return DISPLAY.get(m, m)
+
+
+def _vn_decimal(ax):
+    """Dấu phẩy thập phân trên cả hai trục, như phần chữ của báo cáo."""
+    from matplotlib.ticker import ScalarFormatter
+
+    class _Comma(ScalarFormatter):
+        def __call__(self, x, pos=None):
+            return super().__call__(x, pos).replace(".", ",")
+
+    for axis in (ax.xaxis, ax.yaxis):
+        if isinstance(axis.get_major_formatter(), ScalarFormatter):
+            axis.set_major_formatter(_Comma())
+
 
 def _style(ax):
     ax.set_facecolor(SURFACE)
@@ -59,6 +99,10 @@ def _fig(w=6.4, h=4.2):
 def _save(fig, path: Path, name: str):
     path.mkdir(parents=True, exist_ok=True)
     p = path / name
+    # Đặt bộ định dạng SAU khi vẽ: đặt trước thì trục phân loại (tên phương pháp, tên
+    # kịch bản) mất nhãn chữ, vì matplotlib chỉ gắn nhãn phân loại vào trục còn mặc định.
+    for ax in fig.axes:
+        _vn_decimal(ax)
     fig.savefig(p, facecolor=SURFACE, bbox_inches="tight")
     plt.close(fig)
     print(f"  [fig] {p}")
@@ -103,14 +147,14 @@ def h6(root: Path, arm: str, sc: str, out: Path):
     ci = 0
     for fam, xs in sorted(fams.items()):
         xs.sort()
-        col = ACCENT[ci % len(ACCENT)]
+        col, mk = FAMILY_STYLE.get(fam, (ACCENT[ci % len(ACCENT)], "s"))
         ci += 1
         if len(xs) > 1:                                  # một họ => nối thành đường
-            ax.plot([p[0] for p in xs], [p[1] for p in xs], "-o", color=col,
-                    lw=1.6, ms=4.5, label=fam, zorder=3)
+            ax.plot([p[0] for p in xs], [p[1] for p in xs], "-", marker=mk, color=col,
+                    lw=1.6, ms=4.5, label=_name(fam), zorder=3)
         else:
-            ax.plot(xs[0][0], xs[0][1], "s", color=col, ms=7, label=fam, zorder=3)
-            ax.annotate(fam, (xs[0][0], xs[0][1]), textcoords="offset points",
+            ax.plot(xs[0][0], xs[0][1], mk, color=col, ms=7, label=_name(fam), zorder=3)
+            ax.annotate(_name(fam), (xs[0][0], xs[0][1]), textcoords="offset points",
                         xytext=(6, 4), fontsize=8, color=MUTED)
     ax.set_xlabel("Điện năng (kWh) — thấp hơn là tốt hơn", color=INK, fontsize=10)
     ax.set_ylabel("Chi phí vi phạm — thấp hơn là tốt hơn", color=INK, fontsize=10)
@@ -134,7 +178,10 @@ def h7(traj_dir: Path, out: Path, tag: str = "homo-LOW"):
         if not rows or "lambda" not in rows[0]:
             continue
         lam = [float(r["lambda"]) for r in rows]
+        # "traj-d0.1604" -> "d = 0,1604" (dấu phẩy thập phân như phần chữ)
         label = f.stem.replace("traj-", "").replace("-", " ")
+        if label.startswith("d") and label[1:].replace(".", "", 1).isdigit():
+            label = "$d$ = " + label[1:].replace(".", ",")
         ax.plot(range(1, len(lam) + 1), lam, lw=1.6,
                 color=ACCENT[i % len(ACCENT)], label=label)
         drawn += 1
@@ -143,7 +190,7 @@ def h7(traj_dir: Path, out: Path, tag: str = "homo-LOW"):
         print("  [bỏ qua] H7: CSV không có cột lambda")
         return
     ax.set_xlabel("Lượt cập nhật đối ngẫu", color=INK, fontsize=10)
-    ax.set_ylabel("Nhân tử lambda", color=INK, fontsize=10)
+    ax.set_ylabel(r"Nhân tử $\lambda$", color=INK, fontsize=10)
     ax.set_title("Quỹ đạo nhân tử đối ngẫu theo ngân sách", color=INK,
                  fontsize=11, loc="left")
     ax.legend(frameon=False, fontsize=8, labelcolor=MUTED)
@@ -178,7 +225,7 @@ def h8(root: Path, arms, scenarios, out: Path):
         print("  [bỏ qua] H8: không có dữ liệu sweep")
         return
     ax.set_xlabel("Kịch bản tải", color=INK, fontsize=10)
-    ax.set_ylabel("lambda tại ngân sách chặt nhất", color=INK, fontsize=10)
+    ax.set_ylabel(r"$\lambda$ tại ngân sách chặt nhất", color=INK, fontsize=10)
     ax.set_title("Giá bóng của ràng buộc theo mức tải", color=INK,
                  fontsize=11, loc="left")
     ax.legend(frameon=False, fontsize=8, labelcolor=MUTED)
@@ -220,7 +267,7 @@ def h9(root: Path, arm: str, sc: str, out: Path):
 
     fig, ax = _fig(6.4, 0.42 * len(names) + 1.6)
     cols = [ACCENT[0] if m == "cmdp-pid" else MUTED for m in names]
-    ax.barh(names, vals, color=cols, height=0.62, xerr=err,
+    ax.barh([_name(m) for m in names], vals, color=cols, height=0.62, xerr=err,
             error_kw={"ecolor": INK, "lw": 1})
     ax.set_xlabel("Thể tích chi phối — cao hơn là tốt hơn", color=INK, fontsize=10)
     ax.set_title(f"Thể tích chi phối — {arm}/{sc}"
