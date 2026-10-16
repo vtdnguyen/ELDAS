@@ -41,6 +41,10 @@ public class GatewayEntryPoint {
     private VmAllocationPolicyFirstFit      firstFitPolicy;
     private VmAllocationPolicyBestFit       bestFitPolicy;
     private VmAllocationPolicyRoundRobin    roundRobinPolicy;
+    // Energy-oriented baselines (defence review): power-aware PABFD and the
+    // Kubernetes bin-packing (MostAllocated) scoring strategy.
+    private VmAllocationPolicyPowerAware      pabfdPolicy;
+    private VmAllocationPolicyK8sMostAllocated k8sMostPolicy;
 
     // ════════════════════════════════════════════════════════════════════════
     //  LIFECYCLE
@@ -120,6 +124,8 @@ public class GatewayEntryPoint {
         firstFitPolicy   = new VmAllocationPolicyFirstFit(manager);
         bestFitPolicy    = new VmAllocationPolicyBestFit(manager);
         roundRobinPolicy = new VmAllocationPolicyRoundRobin(manager);
+        pabfdPolicy      = new VmAllocationPolicyPowerAware(manager);
+        k8sMostPolicy    = new VmAllocationPolicyK8sMostAllocated(manager);
 
         // Print the resolved trace whenever a pattern is in play: an operator must be
         // able to confirm from the log which workload actually ran, without inferring
@@ -332,9 +338,12 @@ public class GatewayEntryPoint {
             case "firstfit"   -> firstFitPolicy  .selectHostForTask(hosts, task);
             case "bestfit"    -> bestFitPolicy   .selectHostForTask(hosts, task);
             case "roundrobin" -> roundRobinPolicy.selectHostForTask(hosts, task);
+            case "pabfd"      -> pabfdPolicy     .selectHostForTask(hosts, task);
+            case "k8s-most"   -> k8sMostPolicy   .selectHostForTask(hosts, task);
             default -> throw new IllegalArgumentException(
                     "Unknown policy: " + policyName
-                  + " (expected 'k8s', 'random', 'firstfit', 'bestfit', or 'roundrobin')");
+                  + " (expected 'k8s', 'random', 'firstfit', 'bestfit', 'roundrobin',"
+                  + " 'pabfd', or 'k8s-most')");
         };
     }
 

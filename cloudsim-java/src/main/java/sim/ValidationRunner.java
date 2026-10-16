@@ -62,6 +62,7 @@ public final class ValidationRunner {
         testB21_TraceResolutionIsSafe();
         testB22_GeneratedTraceMatchesItsManifest();
         testB23_DroppedTasksAreCharged();
+        testB24_EnergyAwareBaselines();
 
         banner("Summary");
         String topo = System.getenv("TOPOLOGY_CONFIG");
@@ -1508,6 +1509,98 @@ public final class ValidationRunner {
                     (double) dHet / Math.max(1, nHet) > highRate);
         } catch (Exception e) {
             fail("B23", e.toString());
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  B24 — Energy-aware baselines (PABFD, K8s MostAllocated)
+    //
+    //  (a) PABFD consolidates: once host 0 is ACTIVE it keeps choosing it,
+    //      because every other host would add its whole idle bill.
+    //  (b) ΔP of an ACTIVE host equals the hand-computed linear increment.
+    //  (c) K8s MostAllocated packs onto the loaded host — the mirror image of
+    //      B1b, where stock LeastAllocated moves away from it.
+    //  (d) Hetero: PABFD wakes the cheapest SKU that fits — a CPU task goes to
+    //      a CPU-only host (60 W idle), a GPU task to a balanced host, never to
+    //      the 200 W GPU-heavy SKU.
+    // ──────────────────────────────────────────────────────────────────────
+    private static void testB24_EnergyAwareBaselines() {
+        try {
+            SimulationManager m = new SimulationManager(
+                    SimulationConfig.DEFAULT_DC, SimulationConfig.TRACE_FILE,
+                    Scenario.LEGACY_LOW, 42L);
+            m.resetSimulation();
+            List<Host> hosts = m.getHosts();
+            VmAllocationPolicyPowerAware pabfd = new VmAllocationPolicyPowerAware(m);
+            VmAllocationPolicyK8sMostAllocated most = new VmAllocationPolicyK8sMostAllocated(m);
+            VmAllocationPolicyK8sDefault least = new VmAllocationPolicyK8sDefault(m);
+
+            TaskRecord cpuTask = new TaskRecord(
+                    "t1", 4000, 1024, 0, 0, "", "BE", "Running", 0, 100, 0, 100, 0.5);
+            assertEq("B24a1", "PABFD on an all-idle cluster picks index 0 (tie)",
+                    0, pabfd.selectHostForTask(hosts, cpuTask));
+
+            m.step(0);
+            assertTrue("B24a2", "host 0 is ACTIVE after one placement",
+                    m.hostState(hosts.get(0)) == SimulationManager.HostState.ACTIVE);
+            int pIdx = pabfd.selectHostForTask(hosts, cpuTask);
+            assertEq("B24a3", "PABFD keeps consolidating onto active host 0", 0, pIdx);
+
+            var ps = m.powerOf(hosts.get(0));
+            int pes = m.specOf(hosts.get(0)).pesCount();
+            int used = pes - m.freePes(hosts.get(0));
+            double expect = (ps.cpuMaxPowerWatt() - ps.cpuIdlePowerWatt())
+                    * (Math.min(1.0, (double) (used + cpuTask.pesNeeded()) / pes)
+                     - Math.min(1.0, (double) used / pes));
+            double got = pabfd.powerIncreaseWatt(hosts.get(0), cpuTask);
+            assertTrue("B24b", String.format(
+                    "ΔP on ACTIVE host = span·Δu (expected %.4f W, got %.4f W)", expect, got),
+                    Math.abs(expect - got) < 1e-9);
+            double idleDp = pabfd.powerIncreaseWatt(hosts.get(1), cpuTask);
+            assertTrue("B24b2", String.format(
+                    "ΔP on an empty host carries the idle bill (%.1f W > %.1f W)", idleDp, got),
+                    idleDp > got + ps.cpuIdlePowerWatt() - ps.suspendedPowerWatt() - 1e-9);
+
+            int mIdx = most.selectHostForTask(hosts, cpuTask);
+            int lIdx = least.selectHostForTask(hosts, cpuTask);
+            assertTrue("B24c", String.format(
+                    "MostAllocated packs onto host 0 (%d) while LeastAllocated spreads (%d)",
+                    mIdx, lIdx), mIdx == 0 && lIdx != 0);
+
+            // (d) heterogeneous cluster — same SKU layout as B17.
+            var dp = SimulationConfig.DEFAULT_POWER;
+            var dh = SimulationConfig.DEFAULT_HOST;
+            SimulationConfig.HostSpec gH = new SimulationConfig.HostSpec(
+                    64, dh.mips(), 256L * 1024, dh.bwMbps(), dh.storageMb(), 4, dh.gpuMemoryMb());
+            SimulationConfig.HostSpec bH = new SimulationConfig.HostSpec(
+                    64, dh.mips(), 256L * 1024, dh.bwMbps(), dh.storageMb(), 2, dh.gpuMemoryMb());
+            SimulationConfig.HostSpec cH = new SimulationConfig.HostSpec(
+                    64, dh.mips(), 256L * 1024, dh.bwMbps(), dh.storageMb(), 0, dh.gpuMemoryMb());
+            java.util.function.BiFunction<Double, Double, SimulationConfig.PowerSpec> pw =
+                    (max, idle) -> new SimulationConfig.PowerSpec(max, idle,
+                            dp.gpuMaxPowerWatt(), dp.gpuIdlePowerWatt(), dp.idleThresholdSec(),
+                            dp.suspendedPowerWatt(), dp.wakeEnergyKwh(), dp.wakeLatencySec());
+            var skus = List.of(
+                    new SimulationConfig.HostSku("gpu-heavy", 3, gH, pw.apply(500.0, 200.0)),
+                    new SimulationConfig.HostSku("balanced",  3, bH, pw.apply(350.0, 120.0)),
+                    new SimulationConfig.HostSku("cpu-only",  4, cH, pw.apply(200.0, 60.0)));
+            SimulationManager h = new SimulationManager(
+                    new SimulationConfig.DatacenterSpec(10, gH, pw.apply(500.0, 200.0), 1.0, skus),
+                    SimulationConfig.TRACE_FILE, Scenario.LEGACY_LOW, 42L);
+            h.resetSimulation();
+            VmAllocationPolicyPowerAware hp = new VmAllocationPolicyPowerAware(h);
+            TaskRecord gpuTask = new TaskRecord(
+                    "g1", 4000, 1024, 1, 1000, "", "Guaranteed", "Running", 0, 100, 0, 100, 2.0);
+            int cIdx = hp.selectHostForTask(h.getHosts(), cpuTask);
+            int gIdx = hp.selectHostForTask(h.getHosts(), gpuTask);
+            assertTrue("B24d1", "hetero: CPU task woken onto a CPU-only host (got " + cIdx + ")",
+                    cIdx >= 6);
+            assertTrue("B24d2", "hetero: GPU task goes to a balanced host, not GPU-heavy (got "
+                    + gIdx + ")", gIdx >= 3 && gIdx <= 5);
+            h.shutdown();
+            m.shutdown();
+        } catch (Exception e) {
+            fail("B24", e.toString());
         }
     }
 

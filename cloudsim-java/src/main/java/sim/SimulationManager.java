@@ -751,6 +751,16 @@ public class SimulationManager {
         return (gpu != null) ? gpu.total() : 0;
     }
 
+    /**
+     * Host state as of the last processed arrival — the same snapshot the agent's
+     * observation one-hot encodes. Baselines that reason about sleeping hosts
+     * (power-aware) read this, so they decide with no more information than the
+     * RL policy has.
+     */
+    public HostState hostState(Host host) {
+        return stateOf(host, lastEnergyTimestamp);
+    }
+
     /** Number of CPU PEs currently free on {@code host}. */
     public int freePes(Host host) {
         return specOf(host).pesCount() - hostPeUsage.getOrDefault(host, 0);
